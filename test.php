@@ -2,4 +2,4 @@
 
 $s = new Colorize("Hello PHP Guild");
 
-echo $s->green()->underlined()->redb();
+echo $s->green()->underlined()->bold()->redb();

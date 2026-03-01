@@ -23,7 +23,7 @@ impl Colorize {
 
     fn black(&self) -> Self {
         Self {
-            inner: self.inner.clone().clone().black()
+            inner: self.inner.clone().black()
         }
     }
 
