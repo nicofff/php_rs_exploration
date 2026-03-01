@@ -1,19 +1,20 @@
 #![cfg_attr(windows, feature(abi_vectorcall))]
 
-use std::sync::Mutex;
+use std::{thread::{self, sleep}, time::Duration};
 
 use ext_php_rs::prelude::*;
 
-static VISITORS : Mutex<u32> = Mutex::new(0);
-
 #[php_function]
-fn get_visitors() -> u32 {
-    let mut v = VISITORS.lock().unwrap();
-    *v+=1;
-    *v
+fn say_hello_from_thread(name: String) {
+    thread::spawn(move || {
+        for x in 0..5 {
+            php_println!("{} Hello, {}!", x,  name);
+            sleep(Duration::from_secs(1));
+        }
+    });
 }
 
 #[php_module]
 pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
-    module.function(wrap_function!(get_visitors))
+    module.function(wrap_function!(say_hello_from_thread))
 }
