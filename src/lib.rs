@@ -1,54 +1,58 @@
 #![cfg_attr(windows, feature(abi_vectorcall))]
 
-use std::{thread::{self, sleep}, time::Duration};
+use ext_php_rs::{exception::PhpException, prelude::*, zend::ce};
+use redis::RedisError;
 
-use ext_php_rs::prelude::*;
-use redis::{RedisError, TypedCommands as _};
-
-struct RedisException {
-    inner: RedisError
-}
-
-// impl Into<PhpException> for RedisException {
-//     fn into(self) -> PhpException {
-//         PhpException::default(self.inner.detail().unwrap().to_string())
-//     }
-// }
-
-impl From<RedisException> for PhpException {
-    fn from(value: RedisException) -> Self {
-        //eprintln!("{:?}", value.inner.kind());
-        PhpException::default(value.inner.to_string())
-    }
-}
-
-impl From<RedisError> for RedisException {
-    fn from(value: RedisError) -> Self {
-        RedisException { inner: value }
-    }
-}
-
+// ── Error Handling ──────────────────────────────────────────────────
 
 #[php_class]
-struct RedisWrapper {
-    client: redis::Client,
+#[php(name = "Redis\\RedisException")]
+#[php(extends(ce = ce::exception, stub = "\\Exception"))]
+#[derive(Default)]
+pub struct PhpRedisException;
+
+struct RedisErrorWrapper(RedisError);
+
+impl From<RedisError> for RedisErrorWrapper {
+    fn from(value: RedisError) -> Self {
+        Self(value)
+    }
 }
 
+impl From<RedisErrorWrapper> for PhpException {
+    fn from(value: RedisErrorWrapper) -> Self {
+        PhpException::from_class::<PhpRedisException>(value.0.to_string())
+    }
+}
+
+// ── Redis Client ────────────────────────────────────────────────────
+
+#[php_class]
+#[php(name = "Redis\\Client")]
+struct RedisClient {
+    connection: redis::Connection,
+}
 
 #[php_impl]
-impl RedisWrapper {
-    fn __construct(server: &str) -> Result<Self, RedisException> {
-        let client = redis::Client::open(server)?;
-        Ok(Self { client })
+impl RedisClient {
+    // ── Connection ──────────────────────────────────────────────
+
+    fn __construct(dsn: &str) -> Result<Self, RedisErrorWrapper> {
+        let client = redis::Client::open(dsn)?;
+        let connection = client.get_connection()?;
+        Ok(Self { connection })
     }
-    
-    fn get_key(&mut self, key: &str) -> Result<Option<String>, RedisException> {
-        Ok(self.client.get(key)?)
+
+    fn ping(&mut self) -> Result<String, RedisErrorWrapper> {
+        Ok(redis::cmd("PING").query(&mut self.connection)?)
     }
 }
 
+// ── Module Registration ─────────────────────────────────────────────
 
 #[php_module]
 pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
-    module.class::<RedisWrapper>()
+    module
+        .class::<PhpRedisException>()
+        .class::<RedisClient>()
 }
