@@ -1,7 +1,8 @@
 #![cfg_attr(windows, feature(abi_vectorcall))]
 
 use ext_php_rs::{exception::PhpException, prelude::*, zend::ce};
-use redis::RedisError;
+use redis::{Commands, RedisError};
+use std::collections::HashMap;
 
 // ── Error Handling ──────────────────────────────────────────────────
 
@@ -45,6 +46,66 @@ impl RedisClient {
 
     fn ping(&mut self) -> Result<String, RedisErrorWrapper> {
         Ok(redis::cmd("PING").query(&mut self.connection)?)
+    }
+
+    // ── String Commands ─────────────────────────────────────────
+
+    fn get(&mut self, key: &str) -> Result<Option<String>, RedisErrorWrapper> {
+        Ok(self.connection.get(key)?)
+    }
+
+    fn set(&mut self, key: &str, value: &str) -> Result<(), RedisErrorWrapper> {
+        Ok(self.connection.set(key, value)?)
+    }
+
+    fn set_ex(&mut self, key: &str, value: &str, seconds: u64) -> Result<(), RedisErrorWrapper> {
+        Ok(self.connection.set_ex(key, value, seconds)?)
+    }
+
+    fn set_nx(&mut self, key: &str, value: &str) -> Result<bool, RedisErrorWrapper> {
+        Ok(self.connection.set_nx(key, value)?)
+    }
+
+    fn mget(&mut self, keys: Vec<String>) -> Result<Vec<Option<String>>, RedisErrorWrapper> {
+        Ok(self.connection.mget(keys)?)
+    }
+
+    fn mset(&mut self, items: HashMap<String, String>) -> Result<(), RedisErrorWrapper> {
+        let pairs: Vec<(String, String)> = items.into_iter().collect();
+        Ok(self.connection.mset(&pairs)?)
+    }
+
+    fn incr(&mut self, key: &str, delta: i64) -> Result<i64, RedisErrorWrapper> {
+        Ok(self.connection.incr(key, delta)?)
+    }
+
+    fn decr(&mut self, key: &str, delta: i64) -> Result<i64, RedisErrorWrapper> {
+        Ok(self.connection.decr(key, delta)?)
+    }
+
+    fn append(&mut self, key: &str, value: &str) -> Result<i64, RedisErrorWrapper> {
+        Ok(self.connection.append(key, value)?)
+    }
+
+    fn strlen(&mut self, key: &str) -> Result<i64, RedisErrorWrapper> {
+        Ok(self.connection.strlen(key)?)
+    }
+
+    fn getset(&mut self, key: &str, value: &str) -> Result<Option<String>, RedisErrorWrapper> {
+        Ok(self.connection.getset(key, value)?)
+    }
+
+    fn getrange(&mut self, key: &str, from: isize, to: isize) -> Result<String, RedisErrorWrapper> {
+        Ok(self.connection.getrange(key, from, to)?)
+    }
+
+    fn setrange(&mut self, key: &str, offset: isize, value: &str) -> Result<i64, RedisErrorWrapper> {
+        let result: usize = self.connection.setrange(key, offset, value)?;
+        Ok(result as i64)
+    }
+
+    fn get_del(&mut self, key: &str) -> Result<Option<String>, RedisErrorWrapper> {
+        Ok(self.connection.get_del(key)?)
     }
 }
 
