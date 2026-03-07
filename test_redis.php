@@ -133,6 +133,10 @@ echo "after linsert_before: " . implode(", ", $range) . "\n";
 
 echo "lrem: " . $redis->lrem("test:list", 1, "b") . "\n";
 
+echo "lpush_exists on missing: " . $redis->lpushExists("test:missing_list", "val") . "\n";
+$redis->rpush("test:list", "x");
+echo "rpush_exists: " . $redis->rpushExists("test:list", "y") . "\n";
+
 // Task 6: Set Commands
 echo "\n--- Set Commands ---\n";
 $redis->del("test:set1");
@@ -196,6 +200,15 @@ echo "zrem: " . $redis->zrem("test:zset", "bob") . "\n";
 echo "\n--- Pub/Sub + Server ---\n";
 echo "publish (no subscribers): " . $redis->publish("test:chan", "hello") . "\n";
 echo "Server commands available: flushdb, flushall\n";
+
+// Test error propagation for command errors
+try {
+    $redis->set("test:notlist", "string_value");
+    $redis->llen("test:notlist");
+    echo "FAIL: should have thrown\n";
+} catch (Redis\RedisException $e) {
+    echo "Expected WRONGTYPE error: OK\n";
+}
 
 // Cleanup test keys
 echo "\n--- Cleanup ---\n";
