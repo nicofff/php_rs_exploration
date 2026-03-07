@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 [dependencies]
 colorize = "0.1.0"
 ext-php-rs = "*"
+redis = "1.0.4"
 
 [profile.release]
 strip = "debuginfo"
