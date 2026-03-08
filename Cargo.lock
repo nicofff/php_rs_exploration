@@ -169,12 +169,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "colorize"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc17e449bc7854c50b943d113a98bc0e01dc6585d2c66eaa09ca645ebd8a7e62"
-
-[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1017,7 +1011,6 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "phprs_hello_world"
 version = "0.1.0"
 dependencies = [
- "colorize",
  "ext-php-rs",
  "redis",
 ]
