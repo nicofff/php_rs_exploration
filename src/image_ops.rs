@@ -53,6 +53,14 @@ pub fn fit_cover(src_w: u32, src_h: u32, target_w: u32, target_h: u32) -> (u32, 
     (scaled_w, scaled_h, crop_x, crop_y)
 }
 
+pub fn grayscale_frame(frame: &Frame) -> Frame {
+    let gray = image::DynamicImage::ImageRgba8(frame.buffer.clone()).grayscale().to_rgba8();
+    Frame {
+        buffer: gray,
+        delay_ms: frame.delay_ms,
+    }
+}
+
 pub fn crop_frame(frame: &Frame, x: u32, y: u32, width: u32, height: u32) -> Result<Frame, ImageError> {
     let src_w = frame.buffer.width();
     let src_h = frame.buffer.height();

@@ -149,3 +149,47 @@ echo "JPEG resize: {$info->width}x{$info->height} {$info->format}\n";
 assert($info->format === 'jpeg', "Should be JPEG format");
 
 echo "\nTask 3 passed!\n";
+
+// Task 4: Crop + Grayscale
+echo "\n--- Task 4: Crop + Grayscale ---\n";
+
+// Crop
+$outCrop = '/tmp/rustimage_test_crop.png';
+$image = RustImage\Image::open($tmpJpeg);  // 200x150
+$image->crop(10, 10, 100, 80);
+$image->toPng();
+$image->save($outCrop);
+$info = RustImage\Image::info($outCrop);
+echo "Crop: {$info->width}x{$info->height}\n";
+assert($info->width === 100 && $info->height === 80, "Crop should be 100x80");
+
+// Crop out of bounds
+try {
+    $image = RustImage\Image::open($tmpJpeg);
+    $image->crop(0, 0, 500, 500);
+    echo "FAIL: should have thrown for out-of-bounds crop\n";
+} catch (RustImage\ImageException $e) {
+    echo "Crop bounds error: " . $e->getMessage() . "\n";
+}
+
+// Grayscale
+$outGray = '/tmp/rustimage_test_gray.png';
+$image = RustImage\Image::open($tmpJpeg);
+$image->grayscale();
+$image->toPng();
+$image->save($outGray);
+$info = RustImage\Image::info($outGray);
+echo "Grayscale: {$info->width}x{$info->height}\n";
+assert($info->width === 200 && $info->height === 150, "Grayscale shouldn't change dimensions");
+
+// Chain: crop then resize
+$outChain = '/tmp/rustimage_test_chain.png';
+$image = RustImage\Image::open($tmpJpeg);
+$image->crop(10, 10, 180, 130);
+$image->resize(90, 65);
+$image->toPng();
+$image->save($outChain);
+$info = RustImage\Image::info($outChain);
+echo "Chain crop+resize: {$info->width}x{$info->height}\n";
+
+echo "\nTask 4 passed!\n";

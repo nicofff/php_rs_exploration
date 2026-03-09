@@ -177,6 +177,28 @@ impl PhpImage {
         Ok(())
     }
 
+    pub fn crop(&mut self, x: i64, y: i64, width: i64, height: i64) -> Result<(), ImageError> {
+        if x < 0 || y < 0 || width <= 0 || height <= 0 {
+            return Err(ImageError("Crop parameters must be non-negative and dimensions must be positive".into()));
+        }
+        let mut new_frames = Vec::with_capacity(self.frames.len());
+        for frame in &self.frames {
+            let cropped = image_ops::crop_frame(frame, x as u32, y as u32, width as u32, height as u32)?;
+            new_frames.push(cropped);
+        }
+        self.frames = new_frames;
+        Ok(())
+    }
+
+    pub fn grayscale(&mut self) -> Result<(), ImageError> {
+        let mut new_frames = Vec::with_capacity(self.frames.len());
+        for frame in &self.frames {
+            new_frames.push(image_ops::grayscale_frame(frame));
+        }
+        self.frames = new_frames;
+        Ok(())
+    }
+
     #[php(defaults(quality = None))]
     pub fn to_jpeg(&mut self, quality: Option<i64>) -> Result<(), ImageError> {
         let q = quality.unwrap_or(85) as u8;
