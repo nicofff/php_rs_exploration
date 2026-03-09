@@ -204,6 +204,19 @@ impl PhpImage {
         Ok(())
     }
 
+    #[php(defaults(opacity = None))]
+    pub fn overlay(&mut self, other: &PhpImage, x: i64, y: i64, opacity: Option<f64>) -> Result<(), ImageError> {
+        let overlay_frame = other.frames.first()
+            .ok_or_else(|| ImageError("Overlay image has no data".into()))?;
+        let opacity = opacity.unwrap_or(1.0) as f32;
+
+        self.frames = self.frames.iter().map(|frame| {
+            image_ops::overlay_frame(frame, overlay_frame, x as i32, y as i32, opacity)
+        }).collect();
+
+        Ok(())
+    }
+
     pub fn grayscale(&mut self) -> Result<(), ImageError> {
         let mut new_frames = Vec::with_capacity(self.frames.len());
         for frame in &self.frames {

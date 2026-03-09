@@ -274,3 +274,31 @@ $info = RustImage\Image::info($outGif);
 echo "Resized GIF: {$info->width}x{$info->height} {$info->format}\n";
 
 echo "\nTask 7 passed!\n";
+
+// Task 8: Overlay
+echo "\n--- Task 8: Overlay ---\n";
+
+// Create a small "watermark" PNG
+$tmpWatermark = '/tmp/rustimage_test_watermark.png';
+$wm = imagecreatetruecolor(40, 20);
+imagesavealpha($wm, true);
+$wmBg = imagecolorallocatealpha($wm, 0, 0, 0, 64);
+imagefill($wm, 0, 0, $wmBg);
+$wmText = imagecolorallocate($wm, 255, 255, 255);
+imagestring($wm, 3, 2, 2, "TEST", $wmText);
+imagepng($wm, $tmpWatermark);
+imagedestroy($wm);
+echo "Created watermark: $tmpWatermark\n";
+
+// Overlay watermark on photo
+$outOverlay = '/tmp/rustimage_test_overlay.png';
+$base = RustImage\Image::open($tmpJpeg);
+$watermark = RustImage\Image::open($tmpWatermark);
+$base->overlay($watermark, x: 10, y: 10, opacity: 0.7);
+$base->toPng();
+$base->save($outOverlay);
+$info = RustImage\Image::info($outOverlay);
+echo "Overlay result: {$info->width}x{$info->height}\n";
+assert($info->width === 200 && $info->height === 150, "Overlay shouldn't change dimensions");
+
+echo "\nTask 8 passed!\n";
