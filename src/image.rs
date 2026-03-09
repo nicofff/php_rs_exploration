@@ -211,6 +211,12 @@ impl PhpImage {
         Ok(())
     }
 
+    #[php(defaults(quality = None))]
+    pub fn to_webp(&mut self, quality: Option<i64>) -> Result<(), ImageError> {
+        self.output_format = Some(OutputFormat::Webp(quality.unwrap_or(80) as u8));
+        Ok(())
+    }
+
     pub fn save(&self, path: String) -> Result<(), ImageError> {
         let frame = self.frames.first()
             .ok_or_else(|| ImageError("No frames to save".into()))?;
@@ -234,6 +240,11 @@ impl PhpImage {
                 let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf_writer, quality);
                 rgb_image.write_with_encoder(encoder)
                     .map_err(|e| ImageError(format!("JPEG encoding failed: {}", e)))?;
+            }
+            Some(OutputFormat::Webp(quality)) => {
+                let data = crate::image_encode::encode_webp(frame, quality)?;
+                std::fs::write(&path, &data)
+                    .map_err(|e| ImageError(format!("Failed to save WebP '{}': {}", path, e)))?;
             }
             Some(OutputFormat::Png) | None => {
                 frame.buffer.save(&path)

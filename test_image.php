@@ -193,3 +193,27 @@ $info = RustImage\Image::info($outChain);
 echo "Chain crop+resize: {$info->width}x{$info->height}\n";
 
 echo "\nTask 4 passed!\n";
+
+// Task 5: WebP encode/decode
+echo "\n--- Task 5: WebP ---\n";
+
+// JPEG to WebP conversion
+$outWebp = '/tmp/rustimage_test.webp';
+$image = RustImage\Image::open($tmpJpeg);
+$image->resize(100, 100);
+$image->toWebp(quality: 80);
+$image->save($outWebp);
+echo "Saved WebP: " . filesize($outWebp) . " bytes\n";
+$info = RustImage\Image::info($outWebp);
+echo "WebP info: {$info->width}x{$info->height} {$info->format}\n";
+
+// Re-open WebP and resize again
+$outWebp2 = '/tmp/rustimage_test2.webp';
+$image = RustImage\Image::open($outWebp);
+$image->resize(50, 50);
+$image->toWebp(quality: 60);
+$image->save($outWebp2);
+$info = RustImage\Image::info($outWebp2);
+echo "Re-encoded WebP: {$info->width}x{$info->height}\n";
+
+echo "\nTask 5 passed!\n";
