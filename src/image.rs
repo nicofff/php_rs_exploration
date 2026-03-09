@@ -4,6 +4,7 @@ use image::RgbaImage;
 use crate::image_decode;
 use crate::image_error::ImageError;
 use crate::image_info::ImageInfo;
+use crate::image_ops;
 
 pub(crate) struct Frame {
     pub(crate) buffer: RgbaImage,
@@ -114,5 +115,112 @@ impl PhpImage {
             has_alpha: false,
             is_animated: false,
         })
+    }
+
+    #[php(defaults(fit = None))]
+    pub fn resize(&mut self, width: i64, height: i64, fit: Option<String>) -> Result<(), ImageError> {
+        use fast_image_resize::{FilterType, ResizeAlg};
+
+        if width <= 0 || height <= 0 {
+            return Err(ImageError("Resize dimensions must be positive".into()));
+        }
+        let target_w = width as u32;
+        let target_h = height as u32;
+        let fit_mode = fit.as_deref().unwrap_or("contain");
+        let algorithm = ResizeAlg::Convolution(FilterType::Lanczos3);
+
+        let mut new_frames = Vec::with_capacity(self.frames.len());
+        for frame in &self.frames {
+            let (src_w, src_h) = frame.buffer.dimensions();
+            let resized = match fit_mode {
+                "contain" => {
+                    let (new_w, new_h) = image_ops::fit_contain(src_w, src_h, target_w, target_h);
+                    image_ops::resize_frame(frame, new_w, new_h, algorithm)?
+                }
+                "cover" => {
+                    let (scaled_w, scaled_h, crop_x, crop_y) =
+                        image_ops::fit_cover(src_w, src_h, target_w, target_h);
+                    let scaled = image_ops::resize_frame(frame, scaled_w, scaled_h, algorithm)?;
+                    image_ops::crop_frame(&scaled, crop_x, crop_y, target_w, target_h)?
+                }
+                "fill" => {
+                    image_ops::resize_frame(frame, target_w, target_h, algorithm)?
+                }
+                _ => {
+                    return Err(ImageError(format!("Unknown fit mode '{}'. Use contain, cover, or fill.", fit_mode)));
+                }
+            };
+            new_frames.push(resized);
+        }
+        self.frames = new_frames;
+        Ok(())
+    }
+
+    pub fn thumbnail(&mut self, width: i64, height: i64) -> Result<(), ImageError> {
+        use fast_image_resize::{FilterType, ResizeAlg};
+
+        if width <= 0 || height <= 0 {
+            return Err(ImageError("Thumbnail dimensions must be positive".into()));
+        }
+        let target_w = width as u32;
+        let target_h = height as u32;
+        let algorithm = ResizeAlg::Interpolation(FilterType::Bilinear);
+
+        let mut new_frames = Vec::with_capacity(self.frames.len());
+        for frame in &self.frames {
+            let (src_w, src_h) = frame.buffer.dimensions();
+            let (new_w, new_h) = image_ops::fit_contain(src_w, src_h, target_w, target_h);
+            let resized = image_ops::resize_frame(frame, new_w, new_h, algorithm)?;
+            new_frames.push(resized);
+        }
+        self.frames = new_frames;
+        Ok(())
+    }
+
+    #[php(defaults(quality = None))]
+    pub fn to_jpeg(&mut self, quality: Option<i64>) -> Result<(), ImageError> {
+        let q = quality.unwrap_or(85) as u8;
+        self.output_format = Some(OutputFormat::Jpeg(q));
+        Ok(())
+    }
+
+    pub fn to_png(&mut self) -> Result<(), ImageError> {
+        self.output_format = Some(OutputFormat::Png);
+        Ok(())
+    }
+
+    pub fn save(&self, path: String) -> Result<(), ImageError> {
+        let frame = self.frames.first()
+            .ok_or_else(|| ImageError("No frames to save".into()))?;
+
+        match self.output_format {
+            Some(OutputFormat::Jpeg(quality)) => {
+                // Convert RGBA to RGB for JPEG
+                let (w, h) = frame.buffer.dimensions();
+                let mut rgb_buf = Vec::with_capacity((w * h * 3) as usize);
+                for pixel in frame.buffer.pixels() {
+                    rgb_buf.push(pixel[0]);
+                    rgb_buf.push(pixel[1]);
+                    rgb_buf.push(pixel[2]);
+                }
+                let rgb_image = image::RgbImage::from_raw(w, h, rgb_buf)
+                    .ok_or_else(|| ImageError("Failed to create RGB image".into()))?;
+
+                let file = std::fs::File::create(&path)
+                    .map_err(|e| ImageError(format!("Failed to create file '{}': {}", path, e)))?;
+                let mut buf_writer = std::io::BufWriter::new(file);
+                let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf_writer, quality);
+                rgb_image.write_with_encoder(encoder)
+                    .map_err(|e| ImageError(format!("JPEG encoding failed: {}", e)))?;
+            }
+            Some(OutputFormat::Png) | None => {
+                frame.buffer.save(&path)
+                    .map_err(|e| ImageError(format!("Failed to save image: {}", e)))?;
+            }
+            _ => {
+                return Err(ImageError("Unsupported output format for save".into()));
+            }
+        }
+        Ok(())
     }
 }

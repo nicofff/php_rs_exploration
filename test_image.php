@@ -93,3 +93,59 @@ try {
 }
 
 echo "\nTask 2 passed!\n";
+
+// Task 3: Resize
+echo "\n--- Task 3: Resize ---\n";
+
+// Test contain (default) — should preserve aspect ratio
+$outContain = '/tmp/rustimage_test_contain.png';
+$image = RustImage\Image::open($tmpJpeg);  // 200x150
+$image->resize(100, 100);
+$image->toPng();
+$image->save($outContain);
+$info = RustImage\Image::info($outContain);
+echo "Contain 200x150 into 100x100: {$info->width}x{$info->height}\n";
+assert($info->width === 100, "Contain width should be 100, got {$info->width}");
+assert($info->height === 75, "Contain height should be 75, got {$info->height}");
+
+// Test fill — exact dimensions, stretches
+$outFill = '/tmp/rustimage_test_fill.png';
+$image = RustImage\Image::open($tmpJpeg);
+$image->resize(100, 100, fit: 'fill');
+$image->toPng();
+$image->save($outFill);
+$info = RustImage\Image::info($outFill);
+echo "Fill 200x150 into 100x100: {$info->width}x{$info->height}\n";
+assert($info->width === 100 && $info->height === 100, "Fill should be exactly 100x100");
+
+// Test cover — fill area, crop excess
+$outCover = '/tmp/rustimage_test_cover.png';
+$image = RustImage\Image::open($tmpJpeg);
+$image->resize(100, 100, fit: 'cover');
+$image->toPng();
+$image->save($outCover);
+$info = RustImage\Image::info($outCover);
+echo "Cover 200x150 into 100x100: {$info->width}x{$info->height}\n";
+assert($info->width === 100 && $info->height === 100, "Cover should be exactly 100x100");
+
+// Test thumbnail (bilinear, fast)
+$outThumb = '/tmp/rustimage_test_thumb.png';
+$image = RustImage\Image::open($tmpJpeg);
+$image->thumbnail(50, 50);
+$image->toPng();
+$image->save($outThumb);
+$info = RustImage\Image::info($outThumb);
+echo "Thumbnail 200x150 into 50x50: {$info->width}x{$info->height}\n";
+assert($info->width === 50, "Thumb width should be 50");
+
+// Test JPEG output with quality
+$outJpeg = '/tmp/rustimage_test_resized.jpg';
+$image = RustImage\Image::open($tmpJpeg);
+$image->resize(100, 100);
+$image->toJpeg(quality: 70);
+$image->save($outJpeg);
+$info = RustImage\Image::info($outJpeg);
+echo "JPEG resize: {$info->width}x{$info->height} {$info->format}\n";
+assert($info->format === 'jpeg', "Should be JPEG format");
+
+echo "\nTask 3 passed!\n";
