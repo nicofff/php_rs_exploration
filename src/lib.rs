@@ -4,6 +4,13 @@ use ext_php_rs::{exception::PhpException, prelude::*, zend::ce};
 use redis::{Commands, RedisError};
 use std::collections::{HashMap, HashSet};
 
+mod image;
+mod image_decode;
+mod image_encode;
+mod image_error;
+mod image_info;
+mod image_ops;
+
 // ── Error Handling ──────────────────────────────────────────────────
 
 #[php_class]
@@ -376,4 +383,7 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
     module
         .class::<PhpRedisException>()
         .class::<RedisClient>()
+        .class::<image_error::ImageException>()
+        .class::<image_info::ImageInfo>()
+        .class::<image::PhpImage>()
 }
