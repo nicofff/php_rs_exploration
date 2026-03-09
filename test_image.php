@@ -312,3 +312,12 @@ assert($info->exif === null, "Generated JPEG should have no EXIF");
 echo "EXIF null check OK\n";
 
 echo "\nTask 9 passed!\n";
+
+// --- Cleanup ---
+echo "\n=== Cleanup ===\n";
+$tmpFiles = glob('/tmp/rustimage_test_*');
+foreach ($tmpFiles as $f) {
+    unlink($f);
+}
+echo "Cleaned up " . count($tmpFiles) . " temp files\n";
+echo "\n=== All tests passed! ===\n";
