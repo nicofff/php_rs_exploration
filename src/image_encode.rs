@@ -40,6 +40,33 @@ pub fn encode_webp(frame: &Frame, quality: u8) -> Result<Vec<u8>, ImageError> {
     Ok(memory.to_vec())
 }
 
+pub fn encode_webp_animated(frames: &[Frame], quality: u8) -> Result<Vec<u8>, ImageError> {
+    if frames.is_empty() {
+        return Err(ImageError("No frames to encode".into()));
+    }
+
+    let width = frames[0].buffer.width();
+    let height = frames[0].buffer.height();
+
+    let mut config = webp::WebPConfig::new()
+        .map_err(|_| ImageError("Failed to create WebP config".into()))?;
+    config.quality = quality as f32;
+
+    let mut encoder = webp::AnimEncoder::new(width, height, &config);
+    encoder.set_loop_count(0); // infinite loop
+
+    let mut timestamp_ms: i32 = 0;
+    for frame in frames {
+        let ts = timestamp_ms;
+        timestamp_ms += frame.delay_ms as i32;
+        let anim_frame = webp::AnimFrame::from_rgba(frame.buffer.as_raw(), width, height, ts);
+        encoder.add_frame(anim_frame);
+    }
+
+    let data = encoder.encode();
+    Ok(data.to_vec())
+}
+
 pub fn encode_avif(frame: &Frame, quality: u8) -> Result<Vec<u8>, ImageError> {
     use image::codecs::avif::AvifEncoder;
     use image::ImageEncoder;

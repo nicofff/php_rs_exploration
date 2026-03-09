@@ -329,7 +329,11 @@ impl PhpImage {
                 buf
             }
             OutputFormat::Webp(quality) => {
-                crate::image_encode::encode_webp(frame, quality)?
+                if self.frames.len() > 1 {
+                    crate::image_encode::encode_webp_animated(&self.frames, quality)?
+                } else {
+                    crate::image_encode::encode_webp(frame, quality)?
+                }
             }
             OutputFormat::Avif(quality) => {
                 crate::image_encode::encode_avif(frame, quality)?
@@ -366,7 +370,11 @@ impl PhpImage {
                     .map_err(|e| ImageError(format!("JPEG encoding failed: {}", e)))?;
             }
             Some(OutputFormat::Webp(quality)) => {
-                let data = crate::image_encode::encode_webp(frame, quality)?;
+                let data = if self.frames.len() > 1 {
+                    crate::image_encode::encode_webp_animated(&self.frames, quality)?
+                } else {
+                    crate::image_encode::encode_webp(frame, quality)?
+                };
                 std::fs::write(&path, &data)
                     .map_err(|e| ImageError(format!("Failed to save WebP '{}': {}", path, e)))?;
             }
