@@ -217,6 +217,12 @@ impl PhpImage {
         Ok(())
     }
 
+    #[php(defaults(quality = None))]
+    pub fn to_avif(&mut self, quality: Option<i64>) -> Result<(), ImageError> {
+        self.output_format = Some(OutputFormat::Avif(quality.unwrap_or(60) as u8));
+        Ok(())
+    }
+
     pub fn save(&self, path: String) -> Result<(), ImageError> {
         let frame = self.frames.first()
             .ok_or_else(|| ImageError("No frames to save".into()))?;
@@ -245,6 +251,11 @@ impl PhpImage {
                 let data = crate::image_encode::encode_webp(frame, quality)?;
                 std::fs::write(&path, &data)
                     .map_err(|e| ImageError(format!("Failed to save WebP '{}': {}", path, e)))?;
+            }
+            Some(OutputFormat::Avif(quality)) => {
+                let data = crate::image_encode::encode_avif(frame, quality)?;
+                std::fs::write(&path, &data)
+                    .map_err(|e| ImageError(format!("Failed to save AVIF '{}': {}", path, e)))?;
             }
             Some(OutputFormat::Png) | None => {
                 frame.buffer.save(&path)

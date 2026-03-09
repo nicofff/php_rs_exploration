@@ -217,3 +217,25 @@ $info = RustImage\Image::info($outWebp2);
 echo "Re-encoded WebP: {$info->width}x{$info->height}\n";
 
 echo "\nTask 5 passed!\n";
+
+// Task 6: AVIF
+echo "\n--- Task 6: AVIF ---\n";
+
+$outAvif = '/tmp/rustimage_test.avif';
+$image = RustImage\Image::open($tmpJpeg);
+$image->resize(100, 100);
+$image->toAvif(quality: 60);
+$image->save($outAvif);
+$avifSize = filesize($outAvif);
+echo "Saved AVIF: $avifSize bytes\n";
+assert($avifSize > 0, "AVIF file should not be empty");
+
+// Verify we can read it back (may fail if AVIF decode not available)
+try {
+    $info = RustImage\Image::info($outAvif);
+    echo "AVIF info: {$info->width}x{$info->height} {$info->format}\n";
+} catch (RustImage\ImageException $e) {
+    echo "AVIF info not available (decode support not compiled): " . $e->getMessage() . "\n";
+}
+
+echo "\nTask 6 passed!\n";
