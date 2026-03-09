@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use ext_php_rs::prelude::*;
 
 #[php_class]
@@ -8,6 +9,7 @@ pub struct ImageInfo {
     pub format: String,
     pub has_alpha: bool,
     pub is_animated: bool,
+    pub exif_data: Option<HashMap<String, String>>,
 }
 
 #[php_impl]
@@ -35,5 +37,10 @@ impl ImageInfo {
     #[php(getter)]
     pub fn is_animated(&self) -> bool {
         self.is_animated
+    }
+
+    #[php(getter)]
+    pub fn exif(&self) -> Option<HashMap<String, String>> {
+        self.exif_data.clone()
     }
 }

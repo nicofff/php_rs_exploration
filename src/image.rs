@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use ext_php_rs::prelude::*;
 use image::RgbaImage;
 
@@ -5,6 +6,20 @@ use crate::image_decode;
 use crate::image_error::ImageError;
 use crate::image_info::ImageInfo;
 use crate::image_ops;
+
+fn read_exif(path: &str) -> Option<HashMap<String, String>> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = std::io::BufReader::new(file);
+    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+
+    let mut map = HashMap::new();
+    for field in exif.fields() {
+        let tag = format!("{}", field.tag);
+        let value = field.display_value().to_string();
+        map.insert(tag, value);
+    }
+    Some(map)
+}
 
 pub(crate) struct Frame {
     pub(crate) buffer: RgbaImage,
@@ -122,12 +137,15 @@ impl PhpImage {
             false
         };
 
+        let exif_data = read_exif(&path);
+
         Ok(ImageInfo {
             width,
             height,
             format,
             has_alpha: false,
             is_animated,
+            exif_data,
         })
     }
 

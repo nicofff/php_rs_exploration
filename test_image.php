@@ -302,3 +302,13 @@ echo "Overlay result: {$info->width}x{$info->height}\n";
 assert($info->width === 200 && $info->height === 150, "Overlay shouldn't change dimensions");
 
 echo "\nTask 8 passed!\n";
+
+// Task 9: EXIF
+echo "\n--- Task 9: EXIF ---\n";
+
+$info = RustImage\Image::info($tmpJpeg);
+echo "EXIF on generated JPEG: " . var_export($info->exif, true) . "\n";
+assert($info->exif === null, "Generated JPEG should have no EXIF");
+echo "EXIF null check OK\n";
+
+echo "\nTask 9 passed!\n";
