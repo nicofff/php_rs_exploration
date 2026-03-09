@@ -239,3 +239,38 @@ try {
 }
 
 echo "\nTask 6 passed!\n";
+
+// Task 7: toBuffer + GIF
+echo "\n--- Task 7: toBuffer + GIF ---\n";
+
+// toBuffer test
+$image = RustImage\Image::open($tmpJpeg);
+$image->resize(50, 50);
+$image->toJpeg(quality: 80);
+$buf = $image->toBuffer();
+echo "toBuffer: " . strlen($buf) . " bytes\n";
+assert(strlen($buf) > 0, "Buffer should not be empty");
+
+// Verify buffer can be re-opened
+$image2 = RustImage\Image::fromBuffer($buf);
+echo "fromBuffer(toBuffer) OK\n";
+
+// Create a static GIF using GD
+$tmpGif = '/tmp/rustimage_test_anim.gif';
+$gifImg = imagecreatetruecolor(80, 60);
+$green = imagecolorallocate($gifImg, 0, 255, 0);
+imagefill($gifImg, 0, 0, $green);
+imagegif($gifImg, $tmpGif);
+imagedestroy($gifImg);
+echo "Created test GIF: $tmpGif\n";
+
+// Open and resize GIF
+$image = RustImage\Image::open($tmpGif);
+$image->resize(40, 30);
+$outGif = '/tmp/rustimage_test_resized.gif';
+$image->toGif();
+$image->save($outGif);
+$info = RustImage\Image::info($outGif);
+echo "Resized GIF: {$info->width}x{$info->height} {$info->format}\n";
+
+echo "\nTask 7 passed!\n";

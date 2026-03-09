@@ -66,7 +66,11 @@ impl PhpImage {
             }
         }
 
-        let frames = image_decode::decode_static_from_path(&path)?;
+        let frames = if image_decode::is_gif(&path) {
+            image_decode::decode_gif_frames(&path)?
+        } else {
+            image_decode::decode_static_from_path(&path)?
+        };
 
         // Check first frame dimensions against limits if provided
         if let Some(frame) = frames.first() {
@@ -108,12 +112,22 @@ impl PhpImage {
         let (width, height) = reader.into_dimensions()
             .map_err(|e| ImageError(format!("Failed to read dimensions: {}", e)))?;
 
+        let is_animated = if image_decode::is_gif(&path) {
+            if let Ok(frames) = image_decode::decode_gif_frames(&path) {
+                frames.len() > 1
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
         Ok(ImageInfo {
             width,
             height,
             format,
             has_alpha: false,
-            is_animated: false,
+            is_animated,
         })
     }
 
@@ -223,6 +237,66 @@ impl PhpImage {
         Ok(())
     }
 
+    pub fn to_gif(&mut self) -> Result<(), ImageError> {
+        self.output_format = Some(OutputFormat::Gif);
+        Ok(())
+    }
+
+    pub fn to_buffer(&self) -> Result<ext_php_rs::binary::Binary<u8>, ImageError> {
+        let frame = self.frames.first()
+            .ok_or_else(|| ImageError("No image data".into()))?;
+
+        let format = self.output_format.unwrap_or(OutputFormat::Png);
+        let bytes = match format {
+            OutputFormat::Jpeg(quality) => {
+                let (w, h) = frame.buffer.dimensions();
+                let mut rgb_buf = Vec::with_capacity((w * h * 3) as usize);
+                for pixel in frame.buffer.pixels() {
+                    rgb_buf.push(pixel[0]);
+                    rgb_buf.push(pixel[1]);
+                    rgb_buf.push(pixel[2]);
+                }
+                let rgb_image = image::RgbImage::from_raw(w, h, rgb_buf)
+                    .ok_or_else(|| ImageError("Failed to create RGB image".into()))?;
+
+                let mut buf = Vec::new();
+                let mut cursor = std::io::Cursor::new(&mut buf);
+                let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
+                rgb_image.write_with_encoder(encoder)
+                    .map_err(|e| ImageError(format!("JPEG encoding failed: {}", e)))?;
+                buf
+            }
+            OutputFormat::Png => {
+                use image::ImageEncoder;
+                let (w, h) = frame.buffer.dimensions();
+                let mut buf = Vec::new();
+                let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut buf));
+                encoder.write_image(
+                    frame.buffer.as_raw(),
+                    w,
+                    h,
+                    image::ExtendedColorType::Rgba8,
+                ).map_err(|e| ImageError(format!("PNG encoding failed: {}", e)))?;
+                buf
+            }
+            OutputFormat::Webp(quality) => {
+                crate::image_encode::encode_webp(frame, quality)?
+            }
+            OutputFormat::Avif(quality) => {
+                crate::image_encode::encode_avif(frame, quality)?
+            }
+            OutputFormat::Gif => {
+                let dyn_img = image::DynamicImage::ImageRgba8(frame.buffer.clone());
+                let mut buf = Vec::new();
+                let cursor = std::io::Cursor::new(&mut buf);
+                dyn_img.write_to(cursor, image::ImageFormat::Gif)
+                    .map_err(|e| ImageError(format!("GIF encoding failed: {}", e)))?;
+                buf
+            }
+        };
+        Ok(bytes.into())
+    }
+
     pub fn save(&self, path: String) -> Result<(), ImageError> {
         let frame = self.frames.first()
             .ok_or_else(|| ImageError("No frames to save".into()))?;
@@ -261,8 +335,10 @@ impl PhpImage {
                 frame.buffer.save(&path)
                     .map_err(|e| ImageError(format!("Failed to save image: {}", e)))?;
             }
-            _ => {
-                return Err(ImageError("Unsupported output format for save".into()));
+            Some(OutputFormat::Gif) => {
+                let dyn_img = image::DynamicImage::ImageRgba8(frame.buffer.clone());
+                dyn_img.save(&path)
+                    .map_err(|e| ImageError(format!("Failed to save GIF '{}': {}", path, e)))?;
             }
         }
         Ok(())
