@@ -335,12 +335,7 @@ impl PhpImage {
                 crate::image_encode::encode_avif(frame, quality)?
             }
             OutputFormat::Gif => {
-                let dyn_img = image::DynamicImage::ImageRgba8(frame.buffer.clone());
-                let mut buf = Vec::new();
-                let cursor = std::io::Cursor::new(&mut buf);
-                dyn_img.write_to(cursor, image::ImageFormat::Gif)
-                    .map_err(|e| ImageError(format!("GIF encoding failed: {}", e)))?;
-                buf
+                crate::image_encode::encode_gif_animated(&self.frames)?
             }
         };
         Ok(bytes.into())
@@ -385,8 +380,8 @@ impl PhpImage {
                     .map_err(|e| ImageError(format!("Failed to save image: {}", e)))?;
             }
             Some(OutputFormat::Gif) => {
-                let dyn_img = image::DynamicImage::ImageRgba8(frame.buffer.clone());
-                dyn_img.save(&path)
+                let data = crate::image_encode::encode_gif_animated(&self.frames)?;
+                std::fs::write(&path, &data)
                     .map_err(|e| ImageError(format!("Failed to save GIF '{}': {}", path, e)))?;
             }
         }
