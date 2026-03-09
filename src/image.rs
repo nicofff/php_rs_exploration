@@ -38,8 +38,8 @@ pub(crate) enum OutputFormat {
 #[php_class]
 #[php(name = "RustImage\\Image")]
 pub struct PhpImage {
-    pub frames: Vec<Frame>,
-    pub output_format: Option<OutputFormat>,
+    pub(crate) frames: Vec<Frame>,
+    pub(crate) output_format: Option<OutputFormat>,
 }
 
 #[php_impl]
@@ -246,7 +246,7 @@ impl PhpImage {
 
     #[php(defaults(quality = None))]
     pub fn to_jpeg(&mut self, quality: Option<i64>) -> Result<(), ImageError> {
-        let q = quality.unwrap_or(85) as u8;
+        let q = quality.unwrap_or(85).clamp(0, 100) as u8;
         self.output_format = Some(OutputFormat::Jpeg(q));
         Ok(())
     }
@@ -258,13 +258,13 @@ impl PhpImage {
 
     #[php(defaults(quality = None))]
     pub fn to_webp(&mut self, quality: Option<i64>) -> Result<(), ImageError> {
-        self.output_format = Some(OutputFormat::Webp(quality.unwrap_or(80) as u8));
+        self.output_format = Some(OutputFormat::Webp(quality.unwrap_or(80).clamp(0, 100) as u8));
         Ok(())
     }
 
     #[php(defaults(quality = None))]
     pub fn to_avif(&mut self, quality: Option<i64>) -> Result<(), ImageError> {
-        self.output_format = Some(OutputFormat::Avif(quality.unwrap_or(60) as u8));
+        self.output_format = Some(OutputFormat::Avif(quality.unwrap_or(60).clamp(0, 100) as u8));
         Ok(())
     }
 
