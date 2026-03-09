@@ -26,6 +26,15 @@ pub(crate) struct Frame {
     pub(crate) delay_ms: u32,
 }
 
+impl Clone for Frame {
+    fn clone(&self) -> Self {
+        Self {
+            buffer: self.buffer.clone(),
+            delay_ms: self.delay_ms,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum OutputFormat {
     Jpeg(u8),
@@ -114,6 +123,15 @@ impl PhpImage {
     pub fn from_buffer(bytes: ext_php_rs::binary::Binary<u8>) -> Result<Self, ImageError> {
         let frames = crate::image_decode::decode_static_from_buffer(bytes.as_ref())?;
         Ok(Self { frames, output_format: None })
+    }
+
+    /// Returns a copy of this image with independent pixel data.
+    /// Useful for generating multiple thumbnails from a single decode.
+    pub fn copy(&self) -> Self {
+        Self {
+            frames: self.frames.clone(),
+            output_format: self.output_format,
+        }
     }
 
     pub fn info(path: String) -> Result<ImageInfo, ImageError> {
