@@ -2,7 +2,18 @@ use crate::image_error::ImageError;
 use crate::image::Frame;
 
 pub fn is_gif(path: &str) -> bool {
-    path.to_lowercase().ends_with(".gif")
+    // Check extension first
+    if path.to_lowercase().ends_with(".gif") {
+        return true;
+    }
+    // Fall back to magic bytes
+    if let Ok(mut f) = std::fs::File::open(path) {
+        let mut header = [0u8; 6];
+        if std::io::Read::read_exact(&mut f, &mut header).is_ok() {
+            return &header[..3] == b"GIF";
+        }
+    }
+    false
 }
 
 pub fn decode_gif_frames(path: &str) -> Result<Vec<Frame>, ImageError> {
@@ -68,7 +79,11 @@ pub fn decode_gif_frames(path: &str) -> Result<Vec<Frame>, ImageError> {
 }
 
 pub fn decode_static_from_path(path: &str) -> Result<Vec<Frame>, ImageError> {
-    let img = image::open(path)
+    let reader = image::ImageReader::open(path)
+        .map_err(|e| ImageError(format!("Failed to open image '{}': {}", path, e)))?
+        .with_guessed_format()
+        .map_err(|e| ImageError(format!("Failed to guess format for '{}': {}", path, e)))?;
+    let img = reader.decode()
         .map_err(|e| ImageError(format!("Failed to decode image '{}': {}", path, e)))?;
     Ok(vec![Frame {
         buffer: img.to_rgba8(),
