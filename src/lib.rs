@@ -4,7 +4,6 @@ use ext_php_rs::{exception::PhpException, prelude::*, zend::ce};
 
 
 mod image;
-mod image_decode;
 mod image_encode;
 mod image_error;
 mod image_info;
