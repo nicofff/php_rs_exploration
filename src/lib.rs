@@ -11,6 +11,7 @@ mod image_info;
 mod image_ops;
 mod image_ops_trait;
 mod image_static;
+mod image_animated;
 
 // ── Module Registration ─────────────────────────────────────────────
 
