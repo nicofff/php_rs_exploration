@@ -9,6 +9,7 @@ mod image_encode;
 mod image_error;
 mod image_info;
 mod image_ops;
+mod image_ops_trait;
 
 // ── Module Registration ─────────────────────────────────────────────
 
