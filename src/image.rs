@@ -292,107 +292,51 @@ impl PhpImage {
     }
 
     pub fn to_buffer(&self) -> Result<ext_php_rs::binary::Binary<u8>, ImageError> {
-        let frame = self.frames.first()
-            .ok_or_else(|| ImageError("No image data".into()))?;
-
-        let format = self.output_format.unwrap_or(OutputFormat::Png);
-        let bytes = match format {
-            OutputFormat::Jpeg(quality) => {
-                let (w, h) = frame.buffer.dimensions();
-                let mut rgb_buf = Vec::with_capacity((w * h * 3) as usize);
-                for pixel in frame.buffer.pixels() {
-                    rgb_buf.push(pixel[0]);
-                    rgb_buf.push(pixel[1]);
-                    rgb_buf.push(pixel[2]);
-                }
-                let rgb_image = image::RgbImage::from_raw(w, h, rgb_buf)
-                    .ok_or_else(|| ImageError("Failed to create RGB image".into()))?;
-
-                let mut buf = Vec::new();
-                let mut cursor = std::io::Cursor::new(&mut buf);
-                let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
-                rgb_image.write_with_encoder(encoder)
-                    .map_err(|e| ImageError(format!("JPEG encoding failed: {}", e)))?;
-                buf
-            }
-            OutputFormat::Png => {
-                use image::ImageEncoder;
-                let (w, h) = frame.buffer.dimensions();
-                let mut buf = Vec::new();
-                let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut buf));
-                encoder.write_image(
-                    frame.buffer.as_raw(),
-                    w,
-                    h,
-                    image::ExtendedColorType::Rgba8,
-                ).map_err(|e| ImageError(format!("PNG encoding failed: {}", e)))?;
-                buf
-            }
-            OutputFormat::Webp(quality) => {
-                if self.frames.len() > 1 {
-                    crate::image_encode::encode_webp_animated(&self.frames, quality)?
-                } else {
-                    crate::image_encode::encode_webp(frame, quality)?
-                }
-            }
-            OutputFormat::Avif(quality) => {
-                crate::image_encode::encode_avif(frame, quality)?
-            }
-            OutputFormat::Gif => {
-                crate::image_encode::encode_gif_animated(&self.frames)?
-            }
-        };
+        let bytes = self.encode_to_bytes()?;
         Ok(bytes.into())
     }
 
     pub fn save(&self, path: String) -> Result<(), ImageError> {
+        let bytes = self.encode_to_bytes()?;
+        std::fs::write(&path, &bytes)
+            .map_err(|e| ImageError(format!("Failed to save to '{}': {}", path, e)))
+    }
+
+    fn encode_to_bytes(&self) -> Result<Vec<u8>, ImageError> {
         let frame = self.frames.first()
-            .ok_or_else(|| ImageError("No frames to save".into()))?;
+            .ok_or_else(|| ImageError("No image data".into()))?;
+        let dyn_img = image::DynamicImage::ImageRgba8(frame.buffer.clone());
+        let format = self.output_format.unwrap_or(OutputFormat::Png);
 
-        match self.output_format {
-            Some(OutputFormat::Jpeg(quality)) => {
-                // Convert RGBA to RGB for JPEG
-                let (w, h) = frame.buffer.dimensions();
-                let mut rgb_buf = Vec::with_capacity((w * h * 3) as usize);
-                for pixel in frame.buffer.pixels() {
-                    rgb_buf.push(pixel[0]);
-                    rgb_buf.push(pixel[1]);
-                    rgb_buf.push(pixel[2]);
-                }
-                let rgb_image = image::RgbImage::from_raw(w, h, rgb_buf)
-                    .ok_or_else(|| ImageError("Failed to create RGB image".into()))?;
-
-                let file = std::fs::File::create(&path)
-                    .map_err(|e| ImageError(format!("Failed to create file '{}': {}", path, e)))?;
-                let mut buf_writer = std::io::BufWriter::new(file);
-                let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf_writer, quality);
-                rgb_image.write_with_encoder(encoder)
+        match format {
+            OutputFormat::Jpeg(quality) => {
+                let mut buf = Vec::new();
+                let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
+                    std::io::Cursor::new(&mut buf), quality
+                );
+                dyn_img.to_rgb8().write_with_encoder(encoder)
                     .map_err(|e| ImageError(format!("JPEG encoding failed: {}", e)))?;
+                Ok(buf)
             }
-            Some(OutputFormat::Webp(quality)) => {
-                let data = if self.frames.len() > 1 {
-                    crate::image_encode::encode_webp_animated(&self.frames, quality)?
+            OutputFormat::Png => {
+                let mut buf = Vec::new();
+                dyn_img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+                    .map_err(|e| ImageError(format!("PNG encoding failed: {}", e)))?;
+                Ok(buf)
+            }
+            OutputFormat::Webp(quality) => {
+                if self.frames.len() > 1 {
+                    crate::image_encode::encode_webp_animated(&self.frames, quality)
                 } else {
-                    crate::image_encode::encode_webp(frame, quality)?
-                };
-                std::fs::write(&path, &data)
-                    .map_err(|e| ImageError(format!("Failed to save WebP '{}': {}", path, e)))?;
+                    crate::image_encode::encode_webp(frame, quality)
+                }
             }
-            Some(OutputFormat::Avif(quality)) => {
-                let data = crate::image_encode::encode_avif(frame, quality)?;
-                std::fs::write(&path, &data)
-                    .map_err(|e| ImageError(format!("Failed to save AVIF '{}': {}", path, e)))?;
+            OutputFormat::Avif(quality) => {
+                crate::image_encode::encode_avif(frame, quality)
             }
-            Some(OutputFormat::Png) | None => {
-                frame.buffer.save(&path)
-                    .map_err(|e| ImageError(format!("Failed to save image: {}", e)))?;
-            }
-            Some(OutputFormat::Gif) => {
-                let data = crate::image_encode::encode_gif_animated(&self.frames)?;
-                std::fs::write(&path, &data)
-                    .map_err(|e| ImageError(format!("Failed to save GIF '{}': {}", path, e)))?;
+            OutputFormat::Gif => {
+                crate::image_encode::encode_gif_animated(&self.frames)
             }
         }
-        Ok(())
     }
 }
