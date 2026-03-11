@@ -12,10 +12,8 @@ redis = "1.0.4"
 
 # Image processing
 image = "0.25"
-fast_image_resize = "5"
 webp = "0.3"
 kamadak-exif = "0.5"
-gif = "0.13"
 
 [profile.release]
 strip = "debuginfo"

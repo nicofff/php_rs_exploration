@@ -80,7 +80,6 @@ if (function_exists('imagewebp')) {
     }
     $gdTime = (hrtime(true) - $start) / 1e6;
     echo sprintf("  GD:        %7.0f ms\n", $gdTime);
-    echo sprintf("  Speedup vs GD: %.1fx\n", $gdTime / $rustTime);
 }
 
 if (extension_loaded('imagick')) {
@@ -89,14 +88,16 @@ if (extension_loaded('imagick')) {
         $im = new Imagick($source);
         $im->resizeImage(800, 600, Imagick::FILTER_CATROM, 1, true);
         $im->setImageFormat('webp');
-        $im->setOption('webp:method', '6');
+        //$im->setOption('webp:method', '6');
         $im->setImageCompressionQuality(80);
         $im->writeImage("/tmp/bench_imagick_webp_{$i}.webp");
         $im->destroy();
     }
     $imagickTime = (hrtime(true) - $start) / 1e6;
     echo sprintf("  Imagick:   %7.0f ms\n", $imagickTime);
+    echo sprintf("  Speedup vs GD: %.1fx\n", $gdTime / $rustTime);
     echo sprintf("  Speedup vs Imagick: %.1fx\n", $imagickTime / $rustTime);
+    
 }
 
 // --- Benchmark 3: From buffer (no file I/O in the hot path) ---
