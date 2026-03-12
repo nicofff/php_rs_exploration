@@ -12,6 +12,7 @@ redis = "1.0.4"
 
 # Image processing
 image = "0.25"
+fast_image_resize = { version = "5", features = ["image", "rayon"] }
 webp = "0.3"
 kamadak-exif = "0.5"
 
