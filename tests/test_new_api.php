@@ -158,18 +158,21 @@ function makeTestImage(): string {
 function getPixelRed(string $path, int $x, int $y): int {
     $gd = imagecreatefrompng($path);
     $pixel = imagecolorat($gd, $x, $y);
+    imagedestroy($gd);
     return ($pixel >> 16) & 0xFF;
 }
 
 function getPixelGreen(string $path, int $x, int $y): int {
     $gd = imagecreatefrompng($path);
     $pixel = imagecolorat($gd, $x, $y);
+    imagedestroy($gd);
     return ($pixel >> 8) & 0xFF;
 }
 
 function getPixelBlue(string $path, int $x, int $y): int {
     $gd = imagecreatefrompng($path);
     $pixel = imagecolorat($gd, $x, $y);
+    imagedestroy($gd);
     return $pixel & 0xFF;
 }
 

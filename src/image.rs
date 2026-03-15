@@ -68,7 +68,7 @@ fn read_exif_from_bytes(data: &[u8]) -> Option<HashMap<String, String>> {
 }
 
 fn read_exif_orientation_from_bytes(data: &[u8]) -> Option<u32> {
-    let mut reader = std::io::BufReader::new(std::io::Cursor::new(data));
+    let mut reader = std::io::BufReader::new(Cursor::new(data));
     let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
     exif.fields()
         .find(|f| f.tag == exif::Tag::Orientation)
@@ -408,7 +408,9 @@ impl PhpImage {
                     let fw = fx2.saturating_sub(fx1);
                     let fh = fy2.saturating_sub(fy1);
                     if fw == 0 || fh == 0 {
-                        // Frame is entirely outside crop region; replace with 1x1 transparent.
+                        // Ideally this frame should be dropped from the sequence, but
+                        // ImageSequence does not expose a removal API; 1×1 transparent is a safe
+                        // fallback.
                         *frame.image_mut() = Image::new(1, 1, Rgba { r: 0, g: 0, b: 0, a: 0 });
                     } else {
                         let cropped = crop_image(frame.image(), fx1, fy1, fw, fh);
@@ -422,7 +424,9 @@ impl PhpImage {
 }
 
 /// Crop `img` to the rectangle (x, y, w, h) by pixel copy.
-/// ril 0.10's Image::crop() mutates in-place and returns (), so we use this manual fallback.
+/// ril's `crop()` takes corner coordinates `(x1, y1, x2, y2)` while the PHP API uses origin+size
+/// `(x, y, w, h)`, and ril's crop mutates in place — so a manual pixel-copy approach is used to
+/// return a new image of exactly the right size.
 fn crop_image(img: &Image<Rgba>, x: u32, y: u32, w: u32, h: u32) -> Image<Rgba> {
     let mut dst = Image::new(w, h, Rgba { r: 0, g: 0, b: 0, a: 0 });
     for dy in 0..h {
