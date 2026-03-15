@@ -7,7 +7,6 @@ pub struct ImageInfo {
     pub width: u32,
     pub height: u32,
     pub format: String,
-    pub has_alpha: bool,
     pub is_animated: bool,
     pub exif_data: Option<HashMap<String, String>>,
 }
@@ -27,11 +26,6 @@ impl ImageInfo {
     #[php(getter)]
     pub fn format(&self) -> String {
         self.format.clone()
-    }
-
-    #[php(getter)]
-    pub fn has_alpha(&self) -> bool {
-        self.has_alpha
     }
 
     #[php(getter)]

@@ -8,12 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ext-php-rs = "*"
-redis = "1.0.4"
-
-# Image processing
-image = "0.25"
-fast_image_resize = { version = "5", features = ["image", "rayon"] }
-webp = "0.3"
+ril = { version = "0.10", features = ["all"] }
 kamadak-exif = "0.5"
 
 [profile.release]

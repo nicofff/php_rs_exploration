@@ -20,8 +20,8 @@ impl From<&str> for ImageError {
     }
 }
 
-impl From<image::ImageError> for ImageError {
-    fn from(err: image::ImageError) -> Self {
+impl From<ril::error::Error> for ImageError {
+    fn from(err: ril::error::Error) -> Self {
         Self(err.to_string())
     }
 }
