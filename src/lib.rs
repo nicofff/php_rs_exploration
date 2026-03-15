@@ -1,16 +1,11 @@
 #![cfg_attr(windows, feature(abi_vectorcall))]
 
-use ext_php_rs::{exception::PhpException, prelude::*, zend::ce};
-
+use ext_php_rs::prelude::*;
 
 mod image;
-mod image_encode;
 mod image_error;
 mod image_info;
-mod image_ops;
-mod image_ops_trait;
-mod image_static;
-mod image_animated;
+mod rgb;
 
 // ── Module Registration ─────────────────────────────────────────────
 
@@ -20,4 +15,5 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
         .class::<image_error::ImageException>()
         .class::<image_info::ImageInfo>()
         .class::<image::PhpImage>()
+        .class::<rgb::PhpRgb>()
 }
