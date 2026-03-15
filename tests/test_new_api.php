@@ -141,4 +141,64 @@ unlink($tmpGif);
 
 echo "Task 5 PASSED\n\n";
 
+// ── Task 6: flip() and mirror() ──────────────────────────────────────────────
+echo "--- Task 6: flip() and mirror() ---\n";
+
+// Helper: create a 10x10 image, red pixel at top-left (0,0), rest white
+function makeTestImage(): string {
+    $path = '/tmp/rustimage_flip_src.png';
+    $gd = imagecreatetruecolor(10, 10);
+    imagefill($gd, 0, 0, imagecolorallocate($gd, 255, 255, 255));
+    imagesetpixel($gd, 0, 0, imagecolorallocate($gd, 255, 0, 0));
+    imagepng($gd, $path);
+    imagedestroy($gd);
+    return $path;
+}
+
+function getPixelRed(string $path, int $x, int $y): int {
+    $gd = imagecreatefrompng($path);
+    $pixel = imagecolorat($gd, $x, $y);
+    return ($pixel >> 16) & 0xFF;
+}
+
+function getPixelGreen(string $path, int $x, int $y): int {
+    $gd = imagecreatefrompng($path);
+    $pixel = imagecolorat($gd, $x, $y);
+    return ($pixel >> 8) & 0xFF;
+}
+
+function getPixelBlue(string $path, int $x, int $y): int {
+    $gd = imagecreatefrompng($path);
+    $pixel = imagecolorat($gd, $x, $y);
+    return $pixel & 0xFF;
+}
+
+// flip() — red pixel (0,0) should move to (0,9)
+$src = makeTestImage();
+$img = RustImage\Image::open($src);
+$img->flip();
+$img->toPng();
+$out = '/tmp/rustimage_flip_out.png';
+$img->save($out);
+assert(getPixelRed($out, 0, 9) > 200 && getPixelGreen($out, 0, 9) < 50 && getPixelBlue($out, 0, 9) < 50, "After flip(), red should be at (0,9)");
+assert(getPixelGreen($out, 0, 0) > 200 && getPixelBlue($out, 0, 0) > 200, "After flip(), (0,0) should be white");
+echo "flip() OK\n";
+unlink($out);
+unlink($src);
+
+// mirror() — red pixel (0,0) should move to (9,0)
+$src = makeTestImage();
+$img = RustImage\Image::open($src);
+$img->mirror();
+$img->toPng();
+$out = '/tmp/rustimage_mirror_out.png';
+$img->save($out);
+assert(getPixelRed($out, 9, 0) > 200 && getPixelGreen($out, 9, 0) < 50 && getPixelBlue($out, 9, 0) < 50, "After mirror(), red should be at (9,0)");
+assert(getPixelGreen($out, 0, 0) > 200 && getPixelBlue($out, 0, 0) > 200, "After mirror(), (0,0) should be white");
+echo "mirror() OK\n";
+unlink($out);
+unlink($src);
+
+echo "Task 6 PASSED\n\n";
+
 echo "=== Done ===\n";

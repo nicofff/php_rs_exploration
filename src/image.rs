@@ -312,6 +312,30 @@ impl PhpImage {
         })
     }
 
+    pub fn flip(&mut self) -> Result<(), ImageError> {
+        match &mut self.inner {
+            ImageInner::Static(img) => { img.flip(); }
+            ImageInner::Animated(seq) => {
+                for frame in seq.iter_mut() {
+                    frame.image_mut().flip();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn mirror(&mut self) -> Result<(), ImageError> {
+        match &mut self.inner {
+            ImageInner::Static(img) => { img.mirror(); }
+            ImageInner::Animated(seq) => {
+                for frame in seq.iter_mut() {
+                    frame.image_mut().mirror();
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn crop(&mut self, x: i64, y: i64, width: i64, height: i64) -> Result<(), ImageError> {
         if x < 0 || y < 0 {
             return Err(ImageError("crop: x and y must be non-negative".into()));
