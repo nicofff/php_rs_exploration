@@ -296,6 +296,21 @@ impl PhpImage {
         std::fs::write(&path, &bytes)
             .map_err(|e| ImageError(format!("Failed to save to '{}': {}", path, e)))
     }
+
+    pub fn create(width: i64, height: i64, color: &PhpRgb) -> Result<Self, ImageError> {
+        if width <= 0 || height <= 0 {
+            return Err(ImageError("create: width and height must be positive".into()));
+        }
+        if width > u32::MAX as i64 || height > u32::MAX as i64 {
+            return Err(ImageError("create: dimensions exceed u32::MAX".into()));
+        }
+        Ok(Self {
+            inner: ImageInner::Static(Image::new(width as u32, height as u32, color.to_rgba())),
+            output_format: None,
+            exif_data: None,
+            orientation: None,
+        })
+    }
 }
 
 /// Alpha-composite `overlay` onto `base` at position (x, y) with opacity multiplier.
