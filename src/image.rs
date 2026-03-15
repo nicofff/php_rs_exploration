@@ -311,6 +311,74 @@ impl PhpImage {
             orientation: None,
         })
     }
+
+    pub fn crop(&mut self, x: i64, y: i64, width: i64, height: i64) -> Result<(), ImageError> {
+        if x < 0 || y < 0 {
+            return Err(ImageError("crop: x and y must be non-negative".into()));
+        }
+        if width <= 0 || height <= 0 {
+            return Err(ImageError("crop: width and height must be positive".into()));
+        }
+        if x > u32::MAX as i64 || y > u32::MAX as i64
+            || width > u32::MAX as i64 || height > u32::MAX as i64
+        {
+            return Err(ImageError("crop: dimensions exceed u32::MAX".into()));
+        }
+
+        let xu = x as u32;
+        let yu = y as u32;
+        let wu = width as u32;
+        let hu = height as u32;
+
+        match &mut self.inner {
+            ImageInner::Static(img) => {
+                let (iw, ih) = img.dimensions();
+                if x + width > iw as i64 || y + height > ih as i64 {
+                    return Err(ImageError("crop: region exceeds image bounds".into()));
+                }
+                *img = crop_image(img, xu, yu, wu, hu);
+            }
+            ImageInner::Animated(seq) => {
+                // Validate bounds against the first (largest) frame before mutating.
+                let first_dims = seq.iter().next().map(|f| f.image().dimensions());
+                if let Some((iw, ih)) = first_dims {
+                    if x + width > iw as i64 || y + height > ih as i64 {
+                        return Err(ImageError("crop: region exceeds image bounds".into()));
+                    }
+                }
+                for frame in seq.iter_mut() {
+                    let (iw, ih) = frame.image().dimensions();
+                    // Sub-frames (delta frames) may be smaller; clamp crop to their actual size.
+                    let fx2 = (xu + wu).min(iw);
+                    let fy2 = (yu + hu).min(ih);
+                    let fx1 = xu.min(fx2);
+                    let fy1 = yu.min(fy2);
+                    let fw = fx2.saturating_sub(fx1);
+                    let fh = fy2.saturating_sub(fy1);
+                    if fw == 0 || fh == 0 {
+                        // Frame is entirely outside crop region; replace with 1x1 transparent.
+                        *frame.image_mut() = Image::new(1, 1, Rgba { r: 0, g: 0, b: 0, a: 0 });
+                    } else {
+                        let cropped = crop_image(frame.image(), fx1, fy1, fw, fh);
+                        *frame.image_mut() = cropped;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Crop `img` to the rectangle (x, y, w, h) by pixel copy.
+/// ril 0.10's Image::crop() mutates in-place and returns (), so we use this manual fallback.
+fn crop_image(img: &Image<Rgba>, x: u32, y: u32, w: u32, h: u32) -> Image<Rgba> {
+    let mut dst = Image::new(w, h, Rgba { r: 0, g: 0, b: 0, a: 0 });
+    for dy in 0..h {
+        for dx in 0..w {
+            dst.set_pixel(dx, dy, *img.pixel(x + dx, y + dy));
+        }
+    }
+    dst
 }
 
 /// Alpha-composite `overlay` onto `base` at position (x, y) with opacity multiplier.

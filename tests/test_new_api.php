@@ -63,4 +63,82 @@ try {
 }
 
 echo "Task 4 PASSED\n\n";
+
+// ── Task 5: crop() ───────────────────────────────────────────────────────────
+echo "--- Task 5: crop() ---\n";
+
+// Create a 200x150 test JPEG with a known red square at top-left
+$tmpSrc = '/tmp/rustimage_crop_src.jpg';
+$gd = imagecreatetruecolor(200, 150);
+imagefill($gd, 0, 0, imagecolorallocate($gd, 255, 255, 255));
+imagefilledrectangle($gd, 0, 0, 49, 49, imagecolorallocate($gd, 255, 0, 0));
+imagejpeg($gd, $tmpSrc, 100);
+imagedestroy($gd);
+
+// Basic crop — should produce 100x80
+$img = RustImage\Image::open($tmpSrc);
+$img->crop(0, 0, 100, 80);
+$img->toPng();
+$tmpOut = '/tmp/rustimage_crop_out.png';
+$img->save($tmpOut);
+$info = RustImage\Image::info($tmpOut);
+assert($info->width === 100, "Crop width should be 100, got {$info->width}");
+assert($info->height === 80,  "Crop height should be 80, got {$info->height}");
+echo "Dimensions OK: {$info->width}x{$info->height}\n";
+unlink($tmpOut);
+
+// Crop with offset — red square should be gone (cropped from right side)
+$img = RustImage\Image::open($tmpSrc);
+$img->crop(100, 0, 100, 150);
+$img->toPng();
+$tmpOut2 = '/tmp/rustimage_crop_offset.png';
+$img->save($tmpOut2);
+$gd = imagecreatefrompng($tmpOut2);
+$pixel = imagecolorat($gd, 0, 0);
+$r = ($pixel >> 16) & 0xFF;
+$g = ($pixel >> 8) & 0xFF;
+$b = $pixel & 0xFF;
+// Not red means: either low r, or high g and b (white also has r=255 but g=b=255 too)
+assert(!($r > 200 && $g < 50 && $b < 50), "Top-left of offset crop should not be red, got r=$r g=$g b=$b");
+echo "Offset crop color OK: r=$r\n";
+imagedestroy($gd);
+unlink($tmpOut2);
+unlink($tmpSrc);
+
+// Error: out of bounds
+$img2 = RustImage\Image::create(200, 150, new RustImage\Rgb(255, 255, 255));
+try {
+    $img2->crop(0, 0, 300, 300);
+    echo "FAIL: out-of-bounds crop should throw\n";
+} catch (RustImage\ImageException $e) {
+    echo "Out-of-bounds error OK: " . $e->getMessage() . "\n";
+}
+
+// Error: negative x
+try {
+    $img2->crop(-1, 0, 100, 100);
+    echo "FAIL: negative x should throw\n";
+} catch (RustImage\ImageException $e) {
+    echo "Negative x error OK: " . $e->getMessage() . "\n";
+}
+
+// Animated GIF crop — all frames should be cropped
+$gif = RustImage\Image::open(__DIR__ . '/fixtures/animated.gif');
+$gifInfo = RustImage\Image::info(__DIR__ . '/fixtures/animated.gif');
+$gifW = $gifInfo->width;
+$gifH = $gifInfo->height;
+$cropW = (int)($gifW / 2);
+$cropH = (int)($gifH / 2);
+$gif->crop(0, 0, $cropW, $cropH);
+$gif->toGif();
+$tmpGif = '/tmp/rustimage_crop_anim.gif';
+$gif->save($tmpGif);
+$gifOutInfo = RustImage\Image::info($tmpGif);
+assert($gifOutInfo->width === $cropW, "Animated crop width should be $cropW, got {$gifOutInfo->width}");
+assert($gifOutInfo->height === $cropH, "Animated crop height should be $cropH, got {$gifOutInfo->height}");
+echo "Animated GIF crop OK: {$gifOutInfo->width}x{$gifOutInfo->height}\n";
+unlink($tmpGif);
+
+echo "Task 5 PASSED\n\n";
+
 echo "=== Done ===\n";
