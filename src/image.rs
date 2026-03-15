@@ -11,6 +11,7 @@ use ril::{
 
 use crate::image_error::ImageError;
 use crate::image_info::ImageInfo;
+use crate::rgb::PhpRgb;
 
 // ── ril 0.10 API verification ────────────────────────────────────────────────
 // Source: ~/.cargo/registry/src/.../ril-0.10.3/src/image.rs
@@ -45,6 +46,33 @@ fn read_exif(path: &str) -> Option<HashMap<String, String>> {
         map.insert(format!("{}", field.tag), field.display_value().to_string());
     }
     Some(map)
+}
+
+fn read_exif_orientation(path: &str) -> Option<u32> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = std::io::BufReader::new(file);
+    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+    exif.fields()
+        .find(|f| f.tag == exif::Tag::Orientation)
+        .and_then(|f| f.value.get_uint(0))
+}
+
+fn read_exif_from_bytes(data: &[u8]) -> Option<std::collections::HashMap<String, String>> {
+    let mut reader = std::io::BufReader::new(std::io::Cursor::new(data));
+    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+    let mut map = std::collections::HashMap::new();
+    for field in exif.fields() {
+        map.insert(format!("{}", field.tag), field.display_value().to_string());
+    }
+    Some(map)
+}
+
+fn read_exif_orientation_from_bytes(data: &[u8]) -> Option<u32> {
+    let mut reader = std::io::BufReader::new(std::io::Cursor::new(data));
+    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+    exif.fields()
+        .find(|f| f.tag == exif::Tag::Orientation)
+        .and_then(|f| f.value.get_uint(0))
 }
 
 /// Compute output dimensions for resize modes.
@@ -90,6 +118,8 @@ pub(crate) enum ImageInner {
 pub struct PhpImage {
     pub(crate) inner: ImageInner,
     pub(crate) output_format: Option<OutputFormat>,
+    pub(crate) exif_data: Option<HashMap<String, String>>,
+    pub(crate) orientation: Option<u32>,
 }
 
 #[php_impl]
@@ -114,7 +144,12 @@ impl PhpImage {
                     .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?,
             )
         };
-        Ok(Self { inner, output_format: None })
+        Ok(Self {
+            inner,
+            output_format: None,
+            exif_data: read_exif(&path),
+            orientation: read_exif_orientation(&path),
+        })
     }
 
     pub fn from_buffer(bytes: ext_php_rs::binary::Binary<u8>) -> Result<Self, ImageError> {
@@ -138,7 +173,12 @@ impl PhpImage {
                     .map_err(|e| ImageError(format!("Failed to decode image from buffer: {}", e)))?,
             )
         };
-        Ok(Self { inner, output_format: None })
+        Ok(Self {
+            inner,
+            output_format: None,
+            exif_data: read_exif_from_bytes(data),
+            orientation: read_exif_orientation_from_bytes(data),
+        })
     }
 
     pub fn info(path: String) -> Result<ImageInfo, ImageError> {
