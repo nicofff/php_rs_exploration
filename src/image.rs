@@ -57,10 +57,10 @@ fn read_exif_orientation(path: &str) -> Option<u32> {
         .and_then(|f| f.value.get_uint(0))
 }
 
-fn read_exif_from_bytes(data: &[u8]) -> Option<std::collections::HashMap<String, String>> {
-    let mut reader = std::io::BufReader::new(std::io::Cursor::new(data));
+fn read_exif_from_bytes(data: &[u8]) -> Option<HashMap<String, String>> {
+    let mut reader = std::io::BufReader::new(Cursor::new(data));
     let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
-    let mut map = std::collections::HashMap::new();
+    let mut map = HashMap::new();
     for field in exif.fields() {
         map.insert(format!("{}", field.tag), field.display_value().to_string());
     }
