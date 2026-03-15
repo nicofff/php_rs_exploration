@@ -336,6 +336,34 @@ impl PhpImage {
         Ok(())
     }
 
+    pub fn auto_rotate(&mut self) -> Result<(), ImageError> {
+        let orientation = match self.orientation {
+            None | Some(1) => return Ok(()),
+            Some(v) if v > 8 => return Ok(()),
+            Some(v) => v,
+        };
+
+        match orientation {
+            2 => self.mirror()?,
+            3 => apply_rotation(&mut self.inner, 180),
+            4 => self.flip()?,
+            5 => {
+                apply_rotation(&mut self.inner, 90);
+                self.mirror()?;
+            }
+            6 => apply_rotation(&mut self.inner, 90),
+            7 => {
+                apply_rotation(&mut self.inner, 270);
+                self.mirror()?;
+            }
+            8 => apply_rotation(&mut self.inner, 270),
+            _ => unreachable!(),
+        }
+
+        self.orientation = Some(1);
+        Ok(())
+    }
+
     pub fn crop(&mut self, x: i64, y: i64, width: i64, height: i64) -> Result<(), ImageError> {
         if x < 0 || y < 0 {
             return Err(ImageError("crop: x and y must be non-negative".into()));
@@ -403,6 +431,18 @@ fn crop_image(img: &Image<Rgba>, x: u32, y: u32, w: u32, h: u32) -> Image<Rgba> 
         }
     }
     dst
+}
+
+/// Apply an in-place rotation (0/90/180/270 degrees CW) to all frames of an ImageInner.
+fn apply_rotation(inner: &mut ImageInner, degrees: i32) {
+    match inner {
+        ImageInner::Static(img) => { img.rotate(degrees); }
+        ImageInner::Animated(seq) => {
+            for frame in seq.iter_mut() {
+                frame.image_mut().rotate(degrees);
+            }
+        }
+    }
 }
 
 /// Alpha-composite `overlay` onto `base` at position (x, y) with opacity multiplier.

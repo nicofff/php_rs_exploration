@@ -201,4 +201,45 @@ unlink($src);
 
 echo "Task 6 PASSED\n\n";
 
+// ── Task 7: auto_rotate() ────────────────────────────────────────────────────
+echo "--- Task 7: auto_rotate() ---\n";
+
+// No-op on image without EXIF (create() produces None orientation)
+$img = RustImage\Image::create(100, 50, new RustImage\Rgb(255, 255, 255));
+$img->autoRotate();
+$img->toPng();
+$tmp = '/tmp/rustimage_autorotate_noop.png';
+$img->save($tmp);
+$info = RustImage\Image::info($tmp);
+assert($info->width === 100 && $info->height === 50, "No EXIF: dimensions should be unchanged, got {$info->width}x{$info->height}");
+echo "No-op (no EXIF) OK: {$info->width}x{$info->height}\n";
+unlink($tmp);
+
+// Orientation 6: 100x50 JPEG → after 90° CW rotation → 50x100
+$img = RustImage\Image::open(__DIR__ . '/fixtures/exif_rotated.jpg');
+$img->autoRotate();
+$img->toPng();
+$tmpRot = '/tmp/rustimage_autorotate_rot.png';
+$img->save($tmpRot);
+$infoRot = RustImage\Image::info($tmpRot);
+assert($infoRot->width === 50 && $infoRot->height === 100,
+    "Orientation 6 should produce 50x100, got {$infoRot->width}x{$infoRot->height}");
+echo "Orientation 6 rotation OK: {$infoRot->width}x{$infoRot->height}\n";
+unlink($tmpRot);
+
+// Idempotency — calling twice should not double-rotate (orientation reset to Some(1) after first call)
+$img = RustImage\Image::open(__DIR__ . '/fixtures/exif_rotated.jpg');
+$img->autoRotate();
+$img->autoRotate(); // second call should be a no-op
+$img->toPng();
+$tmpIdem = '/tmp/rustimage_autorotate_idem.png';
+$img->save($tmpIdem);
+$infoIdem = RustImage\Image::info($tmpIdem);
+assert($infoIdem->width === 50 && $infoIdem->height === 100,
+    "Idempotency: second autoRotate() should be no-op, got {$infoIdem->width}x{$infoIdem->height}");
+echo "Idempotency OK: second call is no-op\n";
+unlink($tmpIdem);
+
+echo "Task 7 PASSED\n\n";
+
 echo "=== Done ===\n";
