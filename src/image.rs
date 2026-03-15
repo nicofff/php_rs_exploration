@@ -1,11 +1,40 @@
 use std::collections::HashMap;
+use std::io::Cursor;
 use ext_php_rs::prelude::*;
 
-use crate::image_animated::AnimatedImage;
+use ril::{
+    encode::{Encoder, EncoderMetadata},
+    encodings::jpeg::{JpegEncoder, JpegEncoderOptions},
+    encodings::webp::{WebPEncoderOptions, WebPMuxEncoder, WebPStaticEncoder},
+    Image, ImageFormat, ImageSequence, ResizeAlgorithm, Rgba,
+};
+
 use crate::image_error::ImageError;
 use crate::image_info::ImageInfo;
-use crate::image_ops_trait::ImageOps;
-use crate::image_static::StaticImage;
+
+// ── ril 0.10 API verification ────────────────────────────────────────────────
+// Source: ~/.cargo/registry/src/.../ril-0.10.3/src/image.rs
+//
+//   Image::crop(x1, y1, x2, y2)
+//     → YES. Takes two corner coordinates (top-left and bottom-right), NOT
+//       (x, y, width, height). To crop by origin + size, callers must compute
+//       x2 = x + w, y2 = y + h before calling.
+//
+//   Image::flip_vertical / flip
+//     → Image::flip(&mut self)  — flips vertically (about the x-axis).
+//       Internally: mirror() + rotate_180().
+//
+//   Image::flip_horizontal / mirror
+//     → Image::mirror(&mut self) — flips horizontally (about the y-axis).
+//
+//   Image::rotate(degrees: i32)
+//     → YES, but LIMITED. Only supports 0 / 90 / 180 / 270 degrees (clockwise).
+//       Any other value panics with unimplemented!(). Discrete helpers also
+//       available: rotate_90(), rotate_180(), rotate_270().
+//       For auto_rotate (EXIF orientation), map the orientation tag value to one
+//       of these four calls; no arbitrary-angle fallback is needed since EXIF
+//       only uses 90-degree steps.
+// ────────────────────────────────────────────────────────────────────────────
 
 fn read_exif(path: &str) -> Option<HashMap<String, String>> {
     let file = std::fs::File::open(path).ok()?;
@@ -18,33 +47,42 @@ fn read_exif(path: &str) -> Option<HashMap<String, String>> {
     Some(map)
 }
 
+/// Compute output dimensions for resize modes.
+fn compute_fit(src_w: u32, src_h: u32, target_w: u32, target_h: u32, fit: &str) -> (u32, u32) {
+    match fit {
+        "fill" => (target_w, target_h),
+        "cover" => {
+            let scale = f64::max(target_w as f64 / src_w as f64, target_h as f64 / src_h as f64);
+            let w = ((src_w as f64 * scale).round() as u32).max(1);
+            let h = ((src_h as f64 * scale).round() as u32).max(1);
+            (w, h)
+        }
+        _ => {
+            // contain: fit within target, preserving aspect ratio
+            let scale = f64::min(target_w as f64 / src_w as f64, target_h as f64 / src_h as f64);
+            let w = ((src_w as f64 * scale).round() as u32).max(1);
+            let h = ((src_h as f64 * scale).round() as u32).max(1);
+            (w, h)
+        }
+    }
+}
+
+/// Returns true when the format may contain multiple frames (GIF or WebP).
+fn format_may_animate(fmt: ImageFormat) -> bool {
+    matches!(fmt, ImageFormat::Gif | ImageFormat::WebP)
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum OutputFormat {
     Jpeg(u8),
     Png,
     Gif,
     Webp(u8),
-    Avif(u8),
 }
 
 pub(crate) enum ImageInner {
-    Static(StaticImage),
-    Animated(AnimatedImage),
-}
-
-impl ImageInner {
-    fn as_ops(&self) -> &dyn ImageOps {
-        match self {
-            ImageInner::Static(s)   => s,
-            ImageInner::Animated(a) => a,
-        }
-    }
-    fn as_ops_mut(&mut self) -> &mut dyn ImageOps {
-        match self {
-            ImageInner::Static(s)   => s,
-            ImageInner::Animated(a) => a,
-        }
-    }
+    Static(Image<Rgba>),
+    Animated(ImageSequence<Rgba>),
 }
 
 #[php_class]
@@ -56,158 +94,78 @@ pub struct PhpImage {
 
 #[php_impl]
 impl PhpImage {
-    #[php(defaults(max_width = None, max_height = None, max_bytes = None))]
-    pub fn open(
-        path: String,
-        max_width: Option<i64>,
-        max_height: Option<i64>,
-        max_bytes: Option<i64>,
-    ) -> Result<Self, ImageError> {
-        if let Some(limit) = max_bytes {
-            let file_size = std::fs::metadata(&path)
-                .map_err(|e| ImageError(format!("Failed to read file metadata '{}': {}", path, e)))?
-                .len() as i64;
-            if file_size > limit {
-                return Err(ImageError(format!(
-                    "File size {} bytes exceeds limit of {} bytes", file_size, limit
-                )));
+    pub fn open(path: String) -> Result<Self, ImageError> {
+        let inner = if format_may_animate(ImageFormat::from_path(&path).unwrap_or_default()) {
+            let seq = ImageSequence::<Rgba>::open(&path)
+                .map_err(|e| ImageError(format!("Failed to open sequence '{}': {}", path, e)))?
+                .into_sequence()
+                .map_err(|e| ImageError(format!("Failed to decode frames '{}': {}", path, e)))?;
+            if seq.len() > 1 {
+                ImageInner::Animated(seq)
+            } else {
+                ImageInner::Static(
+                    Image::<Rgba>::open(&path)
+                        .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?,
+                )
             }
-        }
-
-        if max_width.is_some() || max_height.is_some() {
-            if let Ok(reader) = image::ImageReader::open(&path) {
-                if let Ok(reader) = reader.with_guessed_format() {
-                    if let Ok((w, h)) = reader.into_dimensions() {
-                        let mw = max_width.map(|v| v as u32).unwrap_or(u32::MAX);
-                        let mh = max_height.map(|v| v as u32).unwrap_or(u32::MAX);
-                        if w > mw || h > mh {
-                            return Err(ImageError(format!(
-                                "Image dimensions {}x{} exceed limit {}x{}", w, h, mw, mh
-                            )));
-                        }
-                    }
-                }
-            }
-        }
-
-        let reader = image::ImageReader::open(&path)
-            .map_err(|e| ImageError(format!("Failed to open image '{}': {}", path, e)))?
-            .with_guessed_format()
-            .map_err(|e| ImageError(format!("Failed to guess format for '{}': {}", path, e)))?;
-        let format = reader.format();
-
-        // Any format whose decoder implements AnimationDecoder goes to AnimatedImage.
-        // Re-open the file for the decoder (reader already consumed it for format detection).
-        let inner = match format {
-            Some(image::ImageFormat::Gif) => {
-                use image::codecs::gif::GifDecoder;
-                use image::AnimationDecoder;
-                let file = std::fs::File::open(&path)
-                    .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?;
-                let frames = GifDecoder::new(std::io::BufReader::new(file))
-                    .map_err(|e| ImageError(format!("Failed to create GIF decoder: {}", e)))?
-                    .into_frames().collect_frames()
-                    .map_err(|e| ImageError(format!("Failed to read GIF frames: {}", e)))?;
-                ImageInner::Animated(AnimatedImage(frames))
-            }
-            Some(image::ImageFormat::WebP) => {
-                use image::codecs::webp::WebPDecoder;
-                use image::AnimationDecoder;
-                let file = std::fs::File::open(&path)
-                    .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?;
-                let decoder = WebPDecoder::new(std::io::BufReader::new(file))
-                    .map_err(|e| ImageError(format!("Failed to create WebP decoder: {}", e)))?;
-                if decoder.has_animation() {
-                    let frames = decoder.into_frames().collect_frames()
-                        .map_err(|e| ImageError(format!("Failed to read WebP frames: {}", e)))?;
-                    ImageInner::Animated(AnimatedImage(frames))
-                } else {
-                    let img = image::ImageReader::open(&path)
-                        .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?
-                        .with_guessed_format()
-                        .map_err(|e| ImageError(format!("Failed to guess format: {}", e)))?
-                        .decode()
-                        .map_err(|e| ImageError(format!("Failed to decode image: {}", e)))?;
-                    ImageInner::Static(StaticImage(img))
-                }
-            }
-            _ => {
-                let img = reader.decode()
-                    .map_err(|e| ImageError(format!("Failed to decode image '{}': {}", path, e)))?;
-                ImageInner::Static(StaticImage(img))
-            }
+        } else {
+            ImageInner::Static(
+                Image::<Rgba>::open(&path)
+                    .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?,
+            )
         };
-
-        // Post-decode dimension check
-        let (w, h) = inner.as_ops().dimensions();
-        if let Some(max_w) = max_width {
-            if w as i64 > max_w {
-                return Err(ImageError(format!("Image width {} exceeds limit of {}", w, max_w)));
-            }
-        }
-        if let Some(max_h) = max_height {
-            if h as i64 > max_h {
-                return Err(ImageError(format!("Image height {} exceeds limit of {}", h, max_h)));
-            }
-        }
-
         Ok(Self { inner, output_format: None })
     }
 
     pub fn from_buffer(bytes: ext_php_rs::binary::Binary<u8>) -> Result<Self, ImageError> {
-        let img = image::load_from_memory(bytes.as_ref())
-            .map_err(|e| ImageError(format!("Failed to decode image from buffer: {}", e)))?;
-        Ok(Self {
-            inner: ImageInner::Static(StaticImage(img)),
-            output_format: None,
-        })
-    }
-
-    pub fn copy(&self) -> Self {
-        let inner = match &self.inner {
-            ImageInner::Static(s)   => ImageInner::Static(StaticImage(s.0.clone())),
-            ImageInner::Animated(a) => ImageInner::Animated(AnimatedImage(a.0.clone())),
+        let data: &[u8] = bytes.as_ref();
+        let inner = if format_may_animate(ImageFormat::infer_encoding(data)) {
+            let seq = ImageSequence::<Rgba>::from_bytes_inferred(data)
+                .map_err(|e| ImageError(format!("Failed to decode sequence from buffer: {}", e)))?
+                .into_sequence()
+                .map_err(|e| ImageError(format!("Failed to collect frames from buffer: {}", e)))?;
+            if seq.len() > 1 {
+                ImageInner::Animated(seq)
+            } else {
+                ImageInner::Static(
+                    Image::<Rgba>::from_bytes_inferred(data)
+                        .map_err(|e| ImageError(format!("Failed to decode image from buffer: {}", e)))?,
+                )
+            }
+        } else {
+            ImageInner::Static(
+                Image::<Rgba>::from_bytes_inferred(data)
+                    .map_err(|e| ImageError(format!("Failed to decode image from buffer: {}", e)))?,
+            )
         };
-        Self { inner, output_format: self.output_format }
+        Ok(Self { inner, output_format: None })
     }
 
     pub fn info(path: String) -> Result<ImageInfo, ImageError> {
-        let reader = image::ImageReader::open(&path)
-            .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?
-            .with_guessed_format()
-            .map_err(|e| ImageError(format!("Failed to guess format: {}", e)))?;
-        let format_str = reader.format()
-            .map(|f| format!("{:?}", f).to_lowercase())
-            .unwrap_or_else(|| "unknown".to_string());
-        let format_enum = reader.format();
-        let (width, height) = reader.into_dimensions()
-            .map_err(|e| ImageError(format!("Failed to read dimensions: {}", e)))?;
+        let img = Image::<Rgba>::open(&path)
+            .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?;
+        let (width, height) = img.dimensions();
 
-        // Check for animation by attempting AnimationDecoder on formats that support it.
-        let is_animated = match format_enum {
-            Some(image::ImageFormat::Gif) => {
-                use image::codecs::gif::GifDecoder;
-                use image::AnimationDecoder;
-                if let Ok(file) = std::fs::File::open(&path) {
-                    if let Ok(decoder) = GifDecoder::new(std::io::BufReader::new(file)) {
-                        if let Ok(frames) = decoder.into_frames().collect_frames() {
-                            frames.len() > 1
-                        } else { false }
-                    } else { false }
-                } else { false }
-            }
-            Some(image::ImageFormat::WebP) => {
-                use image::codecs::webp::WebPDecoder;
-                if let Ok(file) = std::fs::File::open(&path) {
-                    if let Ok(decoder) = WebPDecoder::new(std::io::BufReader::new(file)) {
-                        decoder.has_animation()
-                    } else { false }
-                } else { false }
-            }
-            _ => false,
+        let format = ImageFormat::from_path(&path)
+            .map(|f| format!("{f}"))
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let is_animated = if format_may_animate(ImageFormat::from_path(&path).unwrap_or_default()) {
+            ImageSequence::<Rgba>::open(&path)
+                .and_then(|iter| iter.into_sequence())
+                .map(|seq| seq.len() > 1)
+                .unwrap_or(false)
+        } else {
+            false
         };
 
-        Ok(ImageInfo { width, height, format: format_str, has_alpha: false, is_animated, exif_data: read_exif(&path) })
+        Ok(ImageInfo {
+            width,
+            height,
+            format,
+            is_animated,
+            exif_data: read_exif(&path),
+        })
     }
 
     #[php(defaults(fit = None))]
@@ -215,40 +173,54 @@ impl PhpImage {
         if width <= 0 || height <= 0 {
             return Err(ImageError("Resize dimensions must be positive".into()));
         }
-        let fit_mode = fit.as_deref().unwrap_or("contain");
-        match fit_mode {
+        let fit_str = fit.as_deref().unwrap_or("contain");
+        match fit_str {
             "contain" | "cover" | "fill" => {}
             _ => return Err(ImageError(format!(
-                "Unknown fit mode '{}'. Use contain, cover, or fill.", fit_mode
+                "Unknown fit mode '{}'. Use contain, cover, or fill.", fit_str
             ))),
         }
-        self.inner.as_ops_mut().resize(width as u32, height as u32, fit_mode)
-    }
 
-    pub fn thumbnail(&mut self, width: i64, height: i64) -> Result<(), ImageError> {
-        if width <= 0 || height <= 0 {
-            return Err(ImageError("Thumbnail dimensions must be positive".into()));
+        let tw = width as u32;
+        let th = height as u32;
+
+        match &mut self.inner {
+            ImageInner::Static(img) => {
+                let (sw, sh) = img.dimensions();
+                let (nw, nh) = compute_fit(sw, sh, tw, th, fit_str);
+                img.resize(nw, nh, ResizeAlgorithm::Lanczos3);
+            }
+            ImageInner::Animated(seq) => {
+                for frame in seq.iter_mut() {
+                    let (sw, sh) = frame.image().dimensions();
+                    let (nw, nh) = compute_fit(sw, sh, tw, th, fit_str);
+                    frame.image_mut().resize(nw, nh, ResizeAlgorithm::Lanczos3);
+                }
+            }
         }
-        self.inner.as_ops_mut().thumbnail(width as u32, height as u32);
         Ok(())
-    }
-
-    pub fn crop(&mut self, x: i64, y: i64, width: i64, height: i64) -> Result<(), ImageError> {
-        if x < 0 || y < 0 || width <= 0 || height <= 0 {
-            return Err(ImageError("Crop parameters must be non-negative and dimensions must be positive".into()));
-        }
-        self.inner.as_ops_mut().crop(x as u32, y as u32, width as u32, height as u32)
     }
 
     #[php(defaults(opacity = None))]
     pub fn overlay(&mut self, other: &PhpImage, x: i64, y: i64, opacity: Option<f64>) -> Result<(), ImageError> {
-        let overlay_img = other.inner.as_ops().first_frame();
-        self.inner.as_ops_mut().overlay(&overlay_img, x as i32, y as i32, opacity.unwrap_or(1.0) as f32);
-        Ok(())
-    }
+        let opacity = opacity.unwrap_or(1.0) as f32;
+        let overlay_img: Image<Rgba> = match &other.inner {
+            ImageInner::Static(img) => img.clone(),
+            ImageInner::Animated(seq) => seq.iter().next()
+                .map(|f| f.image().clone())
+                .ok_or_else(|| ImageError("Overlay source has no frames".into()))?,
+        };
 
-    pub fn grayscale(&mut self) -> Result<(), ImageError> {
-        self.inner.as_ops_mut().grayscale();
+        match &mut self.inner {
+            ImageInner::Static(base) => {
+                apply_overlay(base, &overlay_img, x as i32, y as i32, opacity);
+            }
+            ImageInner::Animated(seq) => {
+                for frame in seq.iter_mut() {
+                    apply_overlay(frame.image_mut(), &overlay_img, x as i32, y as i32, opacity);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -269,12 +241,6 @@ impl PhpImage {
         Ok(())
     }
 
-    #[php(defaults(quality = None))]
-    pub fn to_avif(&mut self, quality: Option<i64>) -> Result<(), ImageError> {
-        self.output_format = Some(OutputFormat::Avif(quality.unwrap_or(60).clamp(0, 100) as u8));
-        Ok(())
-    }
-
     pub fn to_gif(&mut self) -> Result<(), ImageError> {
         self.output_format = Some(OutputFormat::Gif);
         Ok(())
@@ -292,9 +258,122 @@ impl PhpImage {
     }
 }
 
+/// Alpha-composite `overlay` onto `base` at position (x, y) with opacity multiplier.
+fn apply_overlay(base: &mut Image<Rgba>, overlay: &Image<Rgba>, x: i32, y: i32, opacity: f32) {
+    let bw = base.width() as i32;
+    let bh = base.height() as i32;
+    let ow = overlay.width() as i32;
+    let oh = overlay.height() as i32;
+
+    for oy in 0..oh {
+        for ox in 0..ow {
+            let bx = x + ox;
+            let by = y + oy;
+            if bx >= 0 && bx < bw && by >= 0 && by < bh {
+                let src = *overlay.pixel(ox as u32, oy as u32);
+                let dst = *base.pixel(bx as u32, by as u32);
+
+                let src_a = (src.a as f32 / 255.0) * opacity;
+                let dst_a = dst.a as f32 / 255.0;
+                let out_a = src_a + dst_a * (1.0 - src_a);
+
+                let blended = if out_a == 0.0 {
+                    Rgba { r: 0, g: 0, b: 0, a: 0 }
+                } else {
+                    let blend = |s: u8, d: u8| -> u8 {
+                        ((s as f32 * src_a + d as f32 * dst_a * (1.0 - src_a)) / out_a) as u8
+                    };
+                    Rgba {
+                        r: blend(src.r, dst.r),
+                        g: blend(src.g, dst.g),
+                        b: blend(src.b, dst.b),
+                        a: (out_a * 255.0) as u8,
+                    }
+                };
+                base.set_pixel(bx as u32, by as u32, blended);
+            }
+        }
+    }
+}
+
 impl PhpImage {
     fn encode_to_bytes(&self) -> Result<Vec<u8>, ImageError> {
         let format = self.output_format.unwrap_or(OutputFormat::Png);
-        self.inner.as_ops().encode(format)
+        let mut buf = Vec::new();
+
+        match (&self.inner, format) {
+            (ImageInner::Static(img), OutputFormat::Jpeg(quality)) => {
+                encode_jpeg_static(img, quality, &mut buf)?;
+            }
+            (ImageInner::Static(img), OutputFormat::Png) => {
+                img.encode(ImageFormat::Png, &mut Cursor::new(&mut buf))
+                    .map_err(|e| ImageError(format!("PNG encoding failed: {}", e)))?;
+            }
+            (ImageInner::Static(img), OutputFormat::Webp(quality)) => {
+                encode_webp_static(img, quality, &mut buf)?;
+            }
+            (ImageInner::Static(img), OutputFormat::Gif) => {
+                img.encode(ImageFormat::Gif, &mut Cursor::new(&mut buf))
+                    .map_err(|e| ImageError(format!("GIF encoding failed: {}", e)))?;
+            }
+            (ImageInner::Animated(seq), OutputFormat::Gif) => {
+                seq.encode(ImageFormat::Gif, &mut Cursor::new(&mut buf))
+                    .map_err(|e| ImageError(format!("GIF encoding failed: {}", e)))?;
+            }
+            (ImageInner::Animated(seq), OutputFormat::Jpeg(quality)) => {
+                let frame = seq.iter().next()
+                    .ok_or_else(|| ImageError("No frames to encode".into()))?;
+                encode_jpeg_static(frame.image(), quality, &mut buf)?;
+            }
+            (ImageInner::Animated(seq), OutputFormat::Png) => {
+                let frame = seq.iter().next()
+                    .ok_or_else(|| ImageError("No frames to encode".into()))?;
+                frame.image().encode(ImageFormat::Png, &mut Cursor::new(&mut buf))
+                    .map_err(|e| ImageError(format!("PNG encoding failed: {}", e)))?;
+            }
+            (ImageInner::Animated(seq), OutputFormat::Webp(quality)) => {
+                encode_webp_animated(seq, quality, &mut buf)?;
+            }
+        }
+
+        Ok(buf)
     }
+}
+
+fn encode_jpeg_static(img: &Image<Rgba>, quality: u8, buf: &mut Vec<u8>) -> Result<(), ImageError> {
+    let opts = JpegEncoderOptions::new().with_quality(quality);
+    let metadata = EncoderMetadata::from(img).with_config(opts);
+    let mut encoder = JpegEncoder::new(Cursor::new(&mut *buf), metadata)
+        .map_err(|e| ImageError(format!("JPEG encoder init failed: {}", e)))?;
+    encoder.add_frame(img)
+        .map_err(|e| ImageError(format!("JPEG frame encoding failed: {}", e)))?;
+    encoder.finish()
+        .map_err(|e| ImageError(format!("JPEG encoding failed: {}", e)))?;
+    Ok(())
+}
+
+fn encode_webp_static(img: &Image<Rgba>, quality: u8, buf: &mut Vec<u8>) -> Result<(), ImageError> {
+    let opts = WebPEncoderOptions::new().with_quality(quality as f32);
+    let metadata = EncoderMetadata::from(img).with_config(opts);
+    let mut encoder = WebPStaticEncoder::new(Cursor::new(&mut *buf), metadata)
+        .map_err(|e| ImageError(format!("WebP encoder init failed: {}", e)))?;
+    encoder.add_frame(img)
+        .map_err(|e| ImageError(format!("WebP frame encoding failed: {}", e)))?;
+    encoder.finish()
+        .map_err(|e| ImageError(format!("WebP encoding failed: {}", e)))?;
+    Ok(())
+}
+
+fn encode_webp_animated(seq: &ImageSequence<Rgba>, quality: u8, buf: &mut Vec<u8>) -> Result<(), ImageError> {
+    let opts = WebPEncoderOptions::new().with_quality(quality as f32);
+    let metadata = EncoderMetadata::from(seq).with_config(opts);
+    let mut encoder = WebPMuxEncoder::new(Cursor::new(&mut *buf), metadata)
+        .map_err(|e| ImageError(format!("WebP animated encoder init failed: {}", e)))?;
+    for frame in seq.iter() {
+        encoder.add_frame(frame)
+            .map_err(|e| ImageError(format!("WebP animated frame failed: {}", e)))?;
+    }
+    encoder.finish()
+        .map_err(|e| ImageError(format!("WebP animated encoding failed: {}", e)))?;
+    Ok(())
 }
