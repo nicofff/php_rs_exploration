@@ -568,3 +568,85 @@ fn encode_webp_animated(seq: &ImageSequence<Rgba>, quality: u8, buf: &mut Vec<u8
         .map_err(|e| ImageError(format!("WebP animated encoding failed: {}", e)))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ril::{Image, Rgba};
+
+    // ── compute_fit ────────────────────────────────────────────────────────
+
+    #[test]
+    fn compute_fit_contain_landscape_into_square() {
+        // 200×100 contained in 100×100 → limited by width: 100×50
+        let (w, h) = compute_fit(200, 100, 100, 100, "contain");
+        assert_eq!(w, 100);
+        assert_eq!(h, 50);
+    }
+
+    #[test]
+    fn compute_fit_contain_portrait_into_square() {
+        // 100×200 contained in 100×100 → limited by height: 50×100
+        let (w, h) = compute_fit(100, 200, 100, 100, "contain");
+        assert_eq!(w, 50);
+        assert_eq!(h, 100);
+    }
+
+    #[test]
+    fn compute_fit_contain_equal_dimensions() {
+        let (w, h) = compute_fit(100, 100, 50, 50, "contain");
+        assert_eq!(w, 50);
+        assert_eq!(h, 50);
+    }
+
+    #[test]
+    fn compute_fit_contain_one_by_one_source() {
+        let (w, h) = compute_fit(1, 1, 100, 100, "contain");
+        assert_eq!(w, 100);
+        assert_eq!(h, 100);
+    }
+
+    #[test]
+    fn compute_fit_cover_landscape() {
+        // 200×100 covered by 100×100 → scale = max(0.5, 1.0) = 1.0 → 200×100
+        let (w, h) = compute_fit(200, 100, 100, 100, "cover");
+        assert_eq!(w, 200);
+        assert_eq!(h, 100);
+    }
+
+    #[test]
+    fn compute_fit_fill_always_exact() {
+        let (w, h) = compute_fit(200, 100, 77, 33, "fill");
+        assert_eq!(w, 77);
+        assert_eq!(h, 33);
+    }
+
+    // ── crop_image ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn crop_image_output_dimensions_correct() {
+        let src = Image::new(100, 80, Rgba { r: 0, g: 0, b: 0, a: 255 });
+        let cropped = crop_image(&src, 10, 20, 30, 25);
+        assert_eq!(cropped.width(), 30);
+        assert_eq!(cropped.height(), 25);
+    }
+
+    #[test]
+    fn crop_image_origin_pixel_is_correct_source_pixel() {
+        let known = Rgba { r: 200, g: 100, b: 50, a: 255 };
+        let mut src = Image::new(50, 50, Rgba { r: 0, g: 0, b: 0, a: 255 });
+        // Paint a known color at (15, 20)
+        src.set_pixel(15, 20, known);
+        // Crop starting at (15, 20) — pixel (0,0) in result should be `known`
+        let cropped = crop_image(&src, 15, 20, 10, 10);
+        assert_eq!(*cropped.pixel(0, 0), known);
+    }
+
+    // ── read_exif_orientation_from_bytes ───────────────────────────────────
+
+    #[test]
+    fn read_exif_orientation_non_jpeg_returns_none() {
+        let result = read_exif_orientation_from_bytes(b"not a jpeg at all");
+        assert!(result.is_none());
+    }
+}
