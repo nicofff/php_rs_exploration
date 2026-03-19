@@ -6,7 +6,7 @@ use ril::{
     encode::{Encoder, EncoderMetadata},
     encodings::jpeg::{JpegEncoder, JpegEncoderOptions},
     encodings::webp::{WebPEncoderOptions, WebPMuxEncoder, WebPStaticEncoder},
-    Image, ImageFormat, ImageSequence, ResizeAlgorithm, Rgba,
+    Image, ImageFormat, ImageSequence, L, OverlayMode, Paste, ResizeAlgorithm, Rgba,
 };
 
 use crate::image_error::ImageError;
@@ -37,42 +37,34 @@ use crate::rgb::PhpRgb;
 //       only uses 90-degree steps.
 // ────────────────────────────────────────────────────────────────────────────
 
-fn read_exif(path: &str) -> Option<HashMap<String, String>> {
-    let file = std::fs::File::open(path).ok()?;
+/// Parse EXIF in one pass, returning the full tag map and orientation together.
+fn read_exif_full(path: &str) -> (Option<HashMap<String, String>>, Option<u32>) {
+    let Ok(file) = std::fs::File::open(path) else { return (None, None) };
     let mut reader = std::io::BufReader::new(file);
-    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut reader) else { return (None, None) };
     let mut map = HashMap::new();
+    let mut orientation = None;
     for field in exif.fields() {
+        if field.tag == exif::Tag::Orientation {
+            orientation = field.value.get_uint(0);
+        }
         map.insert(format!("{}", field.tag), field.display_value().to_string());
     }
-    Some(map)
+    (Some(map), orientation)
 }
 
-fn read_exif_orientation(path: &str) -> Option<u32> {
-    let file = std::fs::File::open(path).ok()?;
-    let mut reader = std::io::BufReader::new(file);
-    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
-    exif.fields()
-        .find(|f| f.tag == exif::Tag::Orientation)
-        .and_then(|f| f.value.get_uint(0))
-}
-
-fn read_exif_from_bytes(data: &[u8]) -> Option<HashMap<String, String>> {
+fn read_exif_full_from_bytes(data: &[u8]) -> (Option<HashMap<String, String>>, Option<u32>) {
     let mut reader = std::io::BufReader::new(Cursor::new(data));
-    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut reader) else { return (None, None) };
     let mut map = HashMap::new();
+    let mut orientation = None;
     for field in exif.fields() {
+        if field.tag == exif::Tag::Orientation {
+            orientation = field.value.get_uint(0);
+        }
         map.insert(format!("{}", field.tag), field.display_value().to_string());
     }
-    Some(map)
-}
-
-fn read_exif_orientation_from_bytes(data: &[u8]) -> Option<u32> {
-    let mut reader = std::io::BufReader::new(Cursor::new(data));
-    let exif = exif::Reader::new().read_from_container(&mut reader).ok()?;
-    exif.fields()
-        .find(|f| f.tag == exif::Tag::Orientation)
-        .and_then(|f| f.value.get_uint(0))
+    (Some(map), orientation)
 }
 
 /// Compute output dimensions for resize modes.
@@ -144,11 +136,12 @@ impl PhpImage {
                     .map_err(|e| ImageError(format!("Failed to open '{}': {}", path, e)))?,
             )
         };
+        let (exif_data, orientation) = read_exif_full(&path);
         Ok(Self {
             inner,
             output_format: None,
-            exif_data: read_exif(&path),
-            orientation: read_exif_orientation(&path),
+            exif_data,
+            orientation,
         })
     }
 
@@ -173,11 +166,12 @@ impl PhpImage {
                     .map_err(|e| ImageError(format!("Failed to decode image from buffer: {}", e)))?,
             )
         };
+        let (exif_data, orientation) = read_exif_full_from_bytes(data);
         Ok(Self {
             inner,
             output_format: None,
-            exif_data: read_exif_from_bytes(data),
-            orientation: read_exif_orientation_from_bytes(data),
+            exif_data,
+            orientation,
         })
     }
 
@@ -204,7 +198,7 @@ impl PhpImage {
             height,
             format,
             is_animated,
-            exif_data: read_exif(&path),
+            exif_data: read_exif_full(&path).0,
         })
     }
 
@@ -243,21 +237,45 @@ impl PhpImage {
 
     #[php(defaults(opacity = None))]
     pub fn overlay(&mut self, other: &PhpImage, x: i64, y: i64, opacity: Option<f64>) -> Result<(), ImageError> {
-        let opacity = opacity.unwrap_or(1.0) as f32;
-        let overlay_img: Image<Rgba> = match &other.inner {
+        let opacity = (opacity.unwrap_or(1.0) as f32).clamp(0.0, 1.0);
+
+        let mut overlay_img: Image<Rgba> = match &other.inner {
             ImageInner::Static(img) => img.clone(),
             ImageInner::Animated(seq) => seq.iter().next()
                 .map(|f| f.image().clone())
                 .ok_or_else(|| ImageError("Overlay source has no frames".into()))?,
         };
 
+        // Scale every pixel's alpha by the opacity factor.
+        if opacity < 1.0 {
+            let opacity_u8 = (opacity * 255.0 + 0.5) as u32;
+            overlay_img = overlay_img.map_alpha_pixels(|a| L(((a.0 as u32 * opacity_u8 + 127) / 255) as u8));
+        }
+
+        // Paste requires u32 coordinates; crop the off-screen portion when x/y are negative.
+        let crop_x = if x < 0 { (-x) as u32 } else { 0 };
+        let crop_y = if y < 0 { (-y) as u32 } else { 0 };
+        if crop_x >= overlay_img.width() || crop_y >= overlay_img.height() {
+            return Ok(()); // overlay is entirely off-screen
+        }
+        if crop_x > 0 || crop_y > 0 {
+            let (ow, oh) = overlay_img.dimensions();
+            overlay_img = crop_image(&overlay_img, crop_x, crop_y, ow - crop_x, oh - crop_y);
+        }
+        let paste_x = if x >= 0 { x as u32 } else { 0 };
+        let paste_y = if y >= 0 { y as u32 } else { 0 };
+
+        let paste_op = Paste::new(&overlay_img)
+            .with_position(paste_x, paste_y)
+            .with_overlay_mode(OverlayMode::Merge);
+
         match &mut self.inner {
             ImageInner::Static(base) => {
-                apply_overlay(base, &overlay_img, x as i32, y as i32, opacity);
+                base.draw(&paste_op);
             }
             ImageInner::Animated(seq) => {
                 for frame in seq.iter_mut() {
-                    apply_overlay(frame.image_mut(), &overlay_img, x as i32, y as i32, opacity);
+                    frame.image_mut().draw(&paste_op);
                 }
             }
         }
@@ -449,43 +467,6 @@ fn apply_rotation(inner: &mut ImageInner, degrees: i32) {
     }
 }
 
-/// Alpha-composite `overlay` onto `base` at position (x, y) with opacity multiplier.
-fn apply_overlay(base: &mut Image<Rgba>, overlay: &Image<Rgba>, x: i32, y: i32, opacity: f32) {
-    let bw = base.width() as i32;
-    let bh = base.height() as i32;
-    let ow = overlay.width() as i32;
-    let oh = overlay.height() as i32;
-
-    for oy in 0..oh {
-        for ox in 0..ow {
-            let bx = x + ox;
-            let by = y + oy;
-            if bx >= 0 && bx < bw && by >= 0 && by < bh {
-                let src = *overlay.pixel(ox as u32, oy as u32);
-                let dst = *base.pixel(bx as u32, by as u32);
-
-                let src_a = (src.a as f32 / 255.0) * opacity;
-                let dst_a = dst.a as f32 / 255.0;
-                let out_a = src_a + dst_a * (1.0 - src_a);
-
-                let blended = if out_a == 0.0 {
-                    Rgba { r: 0, g: 0, b: 0, a: 0 }
-                } else {
-                    let blend = |s: u8, d: u8| -> u8 {
-                        ((s as f32 * src_a + d as f32 * dst_a * (1.0 - src_a)) / out_a) as u8
-                    };
-                    Rgba {
-                        r: blend(src.r, dst.r),
-                        g: blend(src.g, dst.g),
-                        b: blend(src.b, dst.b),
-                        a: (out_a * 255.0) as u8,
-                    }
-                };
-                base.set_pixel(bx as u32, by as u32, blended);
-            }
-        }
-    }
-}
 
 impl PhpImage {
     fn encode_to_bytes(&self) -> Result<Vec<u8>, ImageError> {
@@ -646,7 +627,7 @@ mod tests {
 
     #[test]
     fn read_exif_orientation_non_jpeg_returns_none() {
-        let result = read_exif_orientation_from_bytes(b"not a jpeg at all");
-        assert!(result.is_none());
+        let (_, orientation) = read_exif_full_from_bytes(b"not a jpeg at all");
+        assert!(orientation.is_none());
     }
 }

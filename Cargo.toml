@@ -13,3 +13,6 @@ kamadak-exif = "0.5"
 
 [profile.release]
 strip = "debuginfo"
+lto = true
+codegen-units = 1
+opt-level = 3
