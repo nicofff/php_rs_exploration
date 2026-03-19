@@ -29,8 +29,15 @@ class ResizeBench
 
     public function benchGd(array $params): void
     {
+        // GD has no Lanczos; imagecopyresampled (bicubic) is the closest quality tier
         $src     = imagecreatefromjpeg($this->sourcePath);
-        $resized = imagescale($src, $params['width'], $params['height']);
+        $resized = imagecreatetruecolor($params['width'], $params['height']);
+        imagecopyresampled(
+            $resized, $src,
+            0, 0, 0, 0,
+            $params['width'], $params['height'],
+            imagesx($src), imagesy($src)
+        );
         imagejpeg($resized, $this->outPath . '.jpg', 80);
         imagedestroy($src);
         imagedestroy($resized);
@@ -38,8 +45,9 @@ class ResizeBench
 
     public function benchImagick(array $params): void
     {
+        // FILTER_LANCZOS matches RustImage's Lanczos3
         $im = new Imagick($this->sourcePath);
-        $im->resizeImage($params['width'], $params['height'], Imagick::FILTER_CATROM, 1, true);
+        $im->resizeImage($params['width'], $params['height'], Imagick::FILTER_LANCZOS, 1, true);
         $im->setImageCompressionQuality(80);
         $im->writeImage($this->outPath . '.jpg');
         $im->destroy();
