@@ -55,6 +55,8 @@ class EncodeTest extends TestCase
         $img->toWebp(quality: 80);
         $img->save($tmp);
         $this->assertGreaterThan(0, filesize($tmp));
+        $info = Image::info($tmp);
+        $this->assertSame('webp', $info->format);
         unlink($tmp);
     }
 
