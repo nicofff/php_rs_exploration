@@ -5,7 +5,7 @@
     "runner.revs": 5,
     "runner.iterations": 5,
     "runner.php_config": {
-        "extension": "/Users/nfar/Documents/nicofff/phprs_hello_world/target/release/libphprs_hello_world.dylib",
+        "extension": "target/release/libphprs_hello_world.dylib",
         "error_reporting": "22527"
     }
 }
