@@ -2,6 +2,6 @@
     "runner.bootstrap": "vendor/autoload.php",
     "runner.path": "benchmarks/",
     "runner.warmup": 2,
-    "runner.revolutions": 5,
+    "runner.revs": 5,
     "runner.iterations": 5
 }
