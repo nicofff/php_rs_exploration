@@ -19,4 +19,7 @@ phptest:
 
 test: build rusttest phptest
 
-.PHONY: build rusttest phptest test
+bench: build
+	php -d extension=$(EXT_PATH) vendor/bin/phpbench run --report=aggregate
+
+.PHONY: build rusttest phptest test bench
