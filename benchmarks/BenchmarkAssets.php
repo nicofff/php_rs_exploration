@@ -5,7 +5,6 @@ trait BenchmarkAssets
 {
     private string $sourcePath;
     private string $overlayPath;
-    private string $sourceBuffer;
     private string $outPath;
 
     public function setUp(): void
@@ -35,7 +34,6 @@ trait BenchmarkAssets
         imagepng($overlay, $this->overlayPath);
         imagedestroy($overlay);
 
-        $this->sourceBuffer = file_get_contents($this->sourcePath);
     }
 
     public function tearDown(): void
